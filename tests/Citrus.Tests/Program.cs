@@ -294,6 +294,83 @@ Test("Malformed configuration fields are rejected", () =>
 {
     Throws<JsonException>(() => JsonSerializer.Deserialize<RunConfiguration>("{\"initialCahs\":12}", Json.Options));
 });
+Test("Direct buy and sell quantities trade independently of capital weights", () =>
+{
+    var result = Run(new CallbackStrategy(onBar: (c, _) =>
+    {
+        var count = c.History(instrument, 10).Count;
+        if (count == 1) c.Buy("a", instrument, 2.5m);
+        if (count == 2) c.Sell("a", instrument, 1m);
+    }));
+    Equal(2, result.Fills.Count); Equal(2.5m, result.Fills[0].Quantity); Equal(-1m, result.Fills[1].Quantity);
+    Equal(1.5m, result.Final.Positions.Single().Quantity); Equal(1025m, result.Final.Equity);
+});
+Test("Direct order IDs support cancellation and sells can open shorts", () =>
+{
+    var result = Run(new CallbackStrategy(onStart: c =>
+    {
+        var id = c.BuyLimit("a", instrument, 1, 50);
+        True(c.Cancel(id));
+        c.Sell("a", instrument, 2);
+    }));
+    Equal(-2m, result.Fills.Single().Quantity); Equal(960m, result.Final.Equity);
+});
+Test("Direct limit functions preserve sides, prices and day expiry", () =>
+{
+    var result = Run(new CallbackStrategy(onStart: c =>
+    {
+        c.BuyLimit("a", instrument, 2, 99);
+        c.SellLimit("a", instrument, 1, 104);
+        c.SellLimit("a", instrument, 1, 500, TimeInForce.Day);
+    }), Data(Enumerable.Repeat(100m, 25).ToArray()));
+    Equal(99m, result.Fills.Single(f => f.Quantity > 0).Price);
+    Equal(104m, result.Fills.Single(f => f.Quantity < 0).Price);
+    Equal(start.AddDays(1), result.Orders.Single(o => o.Reason == "Day order expired").Time);
+});
+Test("Direct orders reject nonpositive quantities and limit prices", () =>
+{
+    Run(new CallbackStrategy(onStart: c =>
+    {
+        Throws<ArgumentOutOfRangeException>(() => c.Buy("a", instrument, 0));
+        Throws<ArgumentOutOfRangeException>(() => c.Sell("a", instrument, -1));
+        Throws<ArgumentOutOfRangeException>(() => c.BuyLimit("a", instrument, 1, 0));
+        Throws<ArgumentOutOfRangeException>(() => c.SellLimit("a", instrument, 1, -1));
+        Equal(0, c.OpenOrders.Count);
+    }));
+});
+Test("Direct auction functions preserve session timing and quantities", () =>
+{
+    foreach (var sell in new[] { false, true })
+    foreach (var close in new[] { false, true })
+    {
+        var data = Equities();
+        var result = Run(new CallbackStrategy(onBar: (c, _) =>
+        {
+            if (c.History(equity, 2).Count != 1) return;
+            if (close) { if (sell) c.SellOnClose("a", equity, 1); else c.BuyOnClose("a", equity, 1); }
+            else { if (sell) c.SellOnOpen("a", equity, 1); else c.BuyOnOpen("a", equity, 1); }
+        }), data);
+        Equal(sell ? -1m : 1m, result.Fills.Single().Quantity);
+        Equal(close ? data.Sessions[1].Close : data.Sessions[1].Open, result.Fills.Single().Time);
+    }
+});
+Test("Compiled C# strategies can call direct order functions", () =>
+{
+    var path = Path.Combine(Temporary(), "direct.cs");
+    File.WriteAllText(path, """
+        using Citrus.Contracts;
+        public sealed class Direct : IStrategy
+        {
+            public void OnStart(IStrategyContext c)
+            {
+                c.Register("direct", 1);
+                c.Buy("direct", new Instrument("test", AssetClass.LinearPerpetual, "BTC"), 1);
+            }
+        }
+        """);
+    using var compiled = CompiledStrategy.Load(path);
+    Equal(1m, Run(compiled.Strategy).Fills.Single().Quantity);
+});
 
 if (args.Length == 3 && args[0] == "--compare")
 {

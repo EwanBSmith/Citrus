@@ -42,15 +42,28 @@ public sealed class BuyAndHold : IStrategy
     public void OnBar(IStrategyContext c, IReadOnlyList<Bar> bars)
     {
         if (c.History(bars[0].Instrument, 2).Count == 1)
-            c.Rebalance("hold", new Dictionary<Instrument, decimal>
-            {
-                [bars[0].Instrument] = 0.5m
-            });
+            c.Buy("hold", bars[0].Instrument, 10);
     }
 }
 ```
 
-Register substrategies during startup with positive capital weights summing to at most one; remaining cash stays unallocated. The default resource limit is 1,000 substrategies and is configurable. A rebalance dictionary describes the complete target portfolio for that substrategy: omitted holdings target zero. Targets use its current equity and completed prices, account for pending quantities, and submit market orders. Batch all desired symbols into one dictionary for a multi-symbol rebalance.
+Use quantity-based order functions directly; rebalancing is optional:
+
+```csharp
+long buyId = context.Buy("trend", instrument, 10);       // buy 10 shares/contracts
+context.Sell("trend", instrument, 5);                   // sell 5; can also open a short
+long limitId = context.BuyLimit("trend", instrument, 10, 95m);
+context.SellLimit("trend", instrument, 5, 110m, TimeInForce.Day);
+context.BuyOnOpen("trend", instrument, 10);             // equity opening auction
+context.SellOnOpen("trend", instrument, 5);
+context.BuyOnClose("trend", instrument, 10);            // equity closing auction
+context.SellOnClose("trend", instrument, 5);
+context.Cancel(limitId);                                // cancel by returned order ID
+```
+
+These calls illustrate alternatives, not a sequence to submit together. All buy/sell functions take a **positive quantity in instrument units**, allow fractional units, and return an order ID. Selling can reduce a long or establish/increase a short; buying can cover a short. Each call places an additional order and does not automatically cancel existing orders. The optional `timeInForce` defaults to `GoodTillCancelled`. They use the same validation, netting, fills, margin checks, and attribution as `Submit(new OrderRequest(...))`, which remains available for explicit signed-quantity requests. Equity opening/closing orders must be submitted before their execution event.
+
+Register substrategies during startup with positive capital weights summing to at most one; remaining cash stays unallocated. These weights allocate starting capital, not order sizes. The default resource limit is 1,000 substrategies and is configurable. When percentage targeting is useful, `Rebalance` remains available: its dictionary describes the complete target portfolio for that substrategy, and omitted holdings target zero. Targets use its current equity and completed prices, account for pending quantities, and submit market orders. Batch all desired symbols into one dictionary for a multi-symbol rebalance.
 
 Callbacks run sequentially. `History` exposes completed bars only and returns copies. `OnScheduled`, `OnOrderUpdate`, `OnFill`, and `OnStop` are optional. Schedules require future UTC times within the run to execute. Orders may be cancelled by ID. SMA and EMA return `null` until their warmup period is available. `Mode` exposes backtest/live context through the same contract; this release does not connect to a live trading venue.
 

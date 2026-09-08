@@ -8,6 +8,6 @@ public sealed class EquityHold : IStrategy
     {
         foreach (var bar in bars)
             if (context.History(bar.Instrument, 2).Count == 1)
-                context.Submit(new("hold", bar.Instrument, 10, OrderType.MarketOnOpen));
+                context.BuyOnOpen("hold", bar.Instrument, 10);
     }
 }
