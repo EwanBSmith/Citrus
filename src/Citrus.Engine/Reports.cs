@@ -40,8 +40,6 @@ public static class Reports
     public static void Export(string directory, BacktestResult result, RunConfiguration configuration, MarketDataset data,
         string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes)
     {
-        if (Directory.Exists(directory) && Directory.EnumerateFileSystemEntries(directory).Any())
-            throw new IOException("Output directory must be empty; use a new directory for each run.");
         Directory.CreateDirectory(directory);
         var annualDays = data.Bars.Any(b => b.Instrument.AssetClass == AssetClass.LinearPerpetual) ? 365 : 252;
         var summary = new
@@ -82,12 +80,12 @@ public static class Reports
         Csv(Path.Combine(directory, "attribution.csv"), ["time", "substrategy", "equity"], result.Equity.SelectMany(p =>
             p.Substrategies.Select(s => new object?[] { p.Time, s.Key, s.Value })));
         var replay = Path.Combine(directory, "inputs"); Directory.CreateDirectory(replay);
-        File.Copy(strategyPath, Path.Combine(replay, "strategy.cs")); File.Copy(dataPath, Path.Combine(replay, "data.json"));
+        CopyInput(strategyPath, Path.Combine(replay, "strategy.cs")); CopyInput(dataPath, Path.Combine(replay, "data.json"));
         var references = new List<string>(); var index = 0;
         foreach (var path in dependencyHashes.Keys)
         {
             var name = $"dependency-{index++}-{Path.GetFileName(path)}";
-            File.Copy(path, Path.Combine(replay, name)); references.Add(name);
+            CopyInput(path, Path.Combine(replay, name)); references.Add(name);
         }
         Json.Write(Path.Combine(replay, "run.json"), configuration with { Strategy = "strategy.cs", Data = "data.json", Output = "../replay", References = references.ToArray(), ReplaySnapshots = "snapshots.json" });
         Json.Write(Path.Combine(replay, "snapshots.json"), result.ExternalSnapshots);
@@ -104,10 +102,17 @@ public static class Reports
             strategyHash = Hash(strategyPath), dataHash = Hash(dataPath), dependencyHashes,
             calendarHash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(data.Sessions, Json.Options))),
             snapshotHashes = result.ExternalSnapshots.ToDictionary(p => p.Key, p => Convert.ToHexString(SHA256.HashData(p.Value))),
-            inputHashes = Directory.GetFiles(replay).OrderBy(p => p, StringComparer.Ordinal).ToDictionary(p => Path.GetFileName(p), Hash),
+            inputHashes = references.Concat(["strategy.cs", "data.json", "run.json", "snapshots.json"])
+                .OrderBy(name => name, StringComparer.Ordinal).ToDictionary(name => name, name => Hash(Path.Combine(replay, name))),
             reproducibility = "Guaranteed only for captured inputs on the same engine/runtime. Trusted scripts may perform untracked external I/O or randomness.",
             data.Provider, data.Version, data.Notes
         });
+    }
+    private static void CopyInput(string source, string destination)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), comparison))
+            File.Copy(source, destination, overwrite: true);
     }
     private static void Csv(string path, string[] headers, IEnumerable<object?[]> rows)
     {

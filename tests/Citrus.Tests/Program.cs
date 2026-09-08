@@ -156,6 +156,30 @@ Test("Export totals and portable replay inputs", () =>
     True(File.Exists(Path.Combine(output, "inputs", "run.json"))); Equal(2, File.ReadAllLines(Path.Combine(output, "fills.csv")).Length);
 });
 
+Test("Repeated exports replace results and inputs while retaining unrelated files", () =>
+{
+    var directory = Temporary(); var strategy = Path.Combine(directory, "strategy.cs"); var dataPath = Path.Combine(directory, "data.json");
+    File.WriteAllText(strategy, "using Citrus.Contracts; public class First : IStrategy { }");
+    var data = Data(100, 110); Json.Write(dataPath, data);
+    var output = Path.Combine(directory, "result");
+    Reports.Export(output, Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument, 2)), data), Config(), data, strategy, dataPath, new Dictionary<string, string>());
+    File.WriteAllText(Path.Combine(output, "notes.txt"), "keep");
+    File.WriteAllText(Path.Combine(output, "inputs", "old-dependency.dll"), "stale");
+    File.WriteAllText(strategy, "using Citrus.Contracts; public class Second : IStrategy { }");
+    data = Data(100, 120); Json.Write(dataPath, data);
+    var result = Run(new CallbackStrategy(), data);
+    Reports.Export(output, result, Config(), data, strategy, dataPath, new Dictionary<string, string>());
+    Equal(0, Json.Read<List<Fill>>(Path.Combine(output, "fills.json")).Count);
+    Equal(1, File.ReadAllLines(Path.Combine(output, "fills.csv")).Length);
+    Equal(File.ReadAllText(strategy), File.ReadAllText(Path.Combine(output, "inputs", "strategy.cs")));
+    Equal(File.ReadAllText(dataPath), File.ReadAllText(Path.Combine(output, "inputs", "data.json")));
+    Equal("keep", File.ReadAllText(Path.Combine(output, "notes.txt")));
+    using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json")));
+    True(!manifest.RootElement.GetProperty("inputHashes").TryGetProperty("old-dependency.dll", out _));
+    // Rerunning with captured inputs already in the destination must not copy a file onto itself.
+    Reports.Export(output, result, Config(), data, Path.Combine(output, "inputs", "strategy.cs"), Path.Combine(output, "inputs", "data.json"), new Dictionary<string, string>());
+});
+
 // Explicit sessions keep holiday and DST behavior independent of the host timezone.
 var equity = new Instrument("alpaca", AssetClass.Equity, "ABC");
 MarketDataset Equities() => new() { Bars = [

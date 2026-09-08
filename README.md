@@ -24,7 +24,7 @@ dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data g
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/equity-run.json
 ```
 
-Choose new output paths when rerunning: data commands do not overwrite existing files and backtests require an empty output directory. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
+Rerunning a backtest overwrites its result files and captured replay inputs in the configured output directory. Data commands also overwrite their output file, so the example commands can be rerun as written. Other files in the result directory are retained; the manifest lists only the current run's inputs. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
 
 The perpetual example has a trend substrategy and a holding substrategy with 70/30 capital allocation. The equity example demonstrates next-session opening orders across a weekend and the US daylight-saving transition. Generated prices have zero funding and no corporate actions unless supplementary events are added.
 

@@ -30,7 +30,6 @@ try
         string Resolve(string path) => Path.GetFullPath(path, root);
         var config = Json.Read<RunConfiguration>(configPath);
         var strategy = Resolve(config.Strategy); var dataPath = Resolve(config.Data); var output = Resolve(config.Output);
-        if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any()) throw new IOException("Output directory must be empty.");
         var data = Json.Read<MarketDataset>(dataPath);
         using var compiled = CompiledStrategy.Load(strategy, config.References.Select(Resolve));
         var snapshots = config.ReplaySnapshots is null ? null : Json.Read<Dictionary<string, byte[]>>(Resolve(config.ReplaySnapshots));
@@ -83,7 +82,6 @@ try
         }
         DatasetValidator.Validate(dataset);
         foreach (var group in dataset.Bars.GroupBy(b => b.Instrument)) DatasetValidator.RequireCoverage(dataset, group.Key, group.Min(b => b.OpenTime), group.Max(b => b.CloseTime));
-        if (File.Exists(args[3])) throw new IOException("Output file exists; choose a new path.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(args[3]))!);
         Json.Write(args[3], dataset); Console.WriteLine($"Saved {dataset.Bars.Count} bars to {args[3]}"); return 0;
     }
