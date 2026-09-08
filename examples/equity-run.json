@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "strategy": "EquityHold.cs",
+  "data": "../artifacts/equity-data.json",
+  "output": "../artifacts/equity-result",
+  "initialCash": 10000,
+  "seed": 42,
+  "simulation": {
+    "commissionFixed": 1,
+    "commissionPerUnit": 0,
+    "spreadBps": 2,
+    "slippageBps": 1,
+    "rejectionProbability": 0,
+    "equityInitialMargin": 0.5,
+    "equityMaintenanceMargin": 0.25,
+    "perpetualInitialMargin": 0.1,
+    "perpetualMaintenanceMargin": 0.05,
+    "annualBorrowRate": 0.03,
+    "shortsAvailable": true
+  }
+}

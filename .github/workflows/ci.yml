@@ -1,0 +1,22 @@
+name: build-and-test
+on: [push, pull_request]
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore Citrus.slnx --configfile NuGet.Config
+      - run: dotnet build Citrus.slnx --no-restore -c Release
+      - run: dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore
+      - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/perpetual-data.json
+      - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/perpetual-run.json
+      - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest artifacts/perpetual-result/inputs/run.json
+      - run: dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore -- --compare artifacts/perpetual-result artifacts/perpetual-result/replay
+      - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/equity-data.json
+      - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/equity-run.json

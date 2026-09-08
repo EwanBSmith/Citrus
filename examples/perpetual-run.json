@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "strategy": "PerpetualTrend.cs",
+  "data": "../artifacts/perpetual-data.json",
+  "output": "../artifacts/perpetual-result",
+  "initialCash": 100000,
+  "seed": 42,
+  "riskFreeRate": 0,
+  "simulation": {
+    "commissionFixed": 0,
+    "commissionPerUnit": 1,
+    "spreadBps": 2,
+    "slippageBps": 1,
+    "rejectionProbability": 0.01,
+    "equityInitialMargin": 0.5,
+    "equityMaintenanceMargin": 0.25,
+    "perpetualInitialMargin": 0.1,
+    "perpetualMaintenanceMargin": 0.05,
+    "annualBorrowRate": 0.03,
+    "shortsAvailable": true
+  }
+}

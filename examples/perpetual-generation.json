@@ -1,0 +1,10 @@
+{
+  "instrument": { "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "BTC" },
+  "interval": { "name": "1h", "minutes": 60 },
+  "start": "2024-01-01T00:00:00Z",
+  "count": 720,
+  "seed": 42,
+  "initialPrice": 40000,
+  "annualDrift": 0.05,
+  "annualVolatility": 0.5
+}
