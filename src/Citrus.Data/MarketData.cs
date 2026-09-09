@@ -4,8 +4,10 @@ using Citrus.Contracts;
 
 namespace Citrus.Data;
 
+/// <summary>Checks normalized market structure and explicit expected bar coverage.</summary>
 public static class DatasetValidator
 {
+    /// <summary>Rejects malformed bars, sessions, and supplementary events; coverage is checked separately.</summary>
     public static void Validate(MarketDataset data)
     {
         if (data.SchemaVersion != 1 || data.Interval.Minutes <= 0 || data.Bars.Count == 0)
@@ -57,6 +59,7 @@ public static class DatasetValidator
         if (data.Funding.GroupBy(f => (f.Instrument, f.Time)).Any(g => g.Count() > 1)) throw new InvalidDataException("Duplicate funding event.");
     }
 
+    /// <summary>Builds bar boundaries for a range, clipping equities to supplied sessions and perpetuals to the range end.</summary>
     public static IReadOnlyList<(DateTimeOffset Open, DateTimeOffset Close)> Expected(Instrument instrument, BarInterval interval,
         DateTimeOffset start, DateTimeOffset end, IReadOnlyList<MarketSession> sessions)
     {
@@ -74,7 +77,9 @@ public static class DatasetValidator
             for (var t = start; t < end; t = t.AddMinutes(interval.Minutes)) result.Add((t, Min(t.AddMinutes(interval.Minutes), end)));
         return result;
     }
+    /// <summary>Returns the earlier instant when clipping a bar to a session or requested range.</summary>
     private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
+    /// <summary>Throws when any expected boundary pair is missing for the requested instrument and range.</summary>
     public static void RequireCoverage(MarketDataset data, Instrument instrument, DateTimeOffset start, DateTimeOffset end)
     {
         var actual = data.Bars.Where(b => b.Instrument == instrument).Select(b => (b.OpenTime, b.CloseTime)).ToHashSet();
@@ -83,8 +88,10 @@ public static class DatasetValidator
     }
 }
 
+/// <summary>Generates seeded synthetic geometric Brownian motion bars without funding or corporate actions.</summary>
 public static class BrownianGenerator
 {
+    /// <summary>Generates count bars using four price steps per bar; equities require enough explicit sessions.</summary>
     public static MarketDataset Generate(Instrument instrument, BarInterval interval, DateTimeOffset start, int count,
         int seed, decimal initialPrice = 100, double annualDrift = 0.05, double annualVolatility = 0.2,
         IReadOnlyList<MarketSession>? sessions = null)
@@ -118,15 +125,21 @@ public static class BrownianGenerator
     }
 }
 
+/// <summary>Specifies an instrument, interval, UTC coverage range, and explicit data revision for a provider.</summary>
 public sealed record DataRequest(Instrument Instrument, BarInterval Interval, DateTimeOffset Start, DateTimeOffset End, string Version = "1");
+/// <summary>Supplies normalized historical market data for an explicit instrument and coverage request.</summary>
 public interface IMarketDataProvider
 {
+    /// <summary>Gets the provider identity, including feed where applicable, used in cache keys.</summary>
     string Name { get; }
+    /// <summary>Fetches normalized data for the requested range with cooperative cancellation.</summary>
     Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Caches versioned provider data on disk, fetching missing ranges; callers must ensure a single writer.</summary>
 public sealed class DataCache(string directory)
 {
+    /// <summary>Reuses validated cached bars, fetches missing ranges, requires coverage, and atomically replaces the cache before returning the requested slice.</summary>
     public async Task<MarketDataset> GetAsync(IMarketDataProvider provider, DataRequest request, IReadOnlyList<MarketSession> sessions,
         CancellationToken cancellationToken = default)
     {

@@ -6,8 +6,10 @@ using Citrus.Contracts;
 
 namespace Citrus.Data;
 
+/// <summary>Shares bounded retries and invariant numeric parsing across market data adapters.</summary>
 internal static class ProviderHttp
 {
+    /// <summary>Sends a fresh request on each attempt, retrying throttling and server errors up to three times; the caller disposes the returned document.</summary>
     public static async Task<JsonDocument> SendAsync(HttpClient client, Func<HttpRequestMessage> request, CancellationToken token)
     {
         for (var attempt = 0; ; attempt++)
@@ -21,15 +23,20 @@ internal static class ProviderHttp
             throw new HttpRequestException($"Market data request failed with HTTP {(int)response.StatusCode}.");
         }
     }
+    /// <summary>Reads a provider decimal supplied either as a JSON number or an invariant numeric string.</summary>
     public static decimal Number(JsonElement item, string name) => item.GetProperty(name).ValueKind == JsonValueKind.String
         ? decimal.Parse(item.GetProperty(name).GetString()!, CultureInfo.InvariantCulture) : item.GetProperty(name).GetDecimal();
 }
 
+/// <summary>Downloads perpetual candles and funding, approximating funding marks from observable candle prices.</summary>
 public sealed class HyperliquidProvider(HttpClient client) : IMarketDataProvider
 {
+    /// <summary>Gets the provider identity used for provenance and cache partitioning.</summary>
     public string Name => "hyperliquid";
+    /// <summary>Posts a JSON info request using shared retry handling; the caller owns the returned document.</summary>
     private Task<JsonDocument> Post(object payload, CancellationToken token) => ProviderHttp.SendAsync(client,
         () => new(HttpMethod.Post, "https://api.hyperliquid.xyz/info") { Content = JsonContent.Create(payload) }, token);
+    /// <summary>Fetches supported hourly or daily history and normalizes provider records for the requested asset class.</summary>
     public async Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default)
     {
         if (request.Instrument.AssetClass != AssetClass.LinearPerpetual) throw new ArgumentException("Hyperliquid adapter requires linear perpetuals.");
@@ -72,15 +79,19 @@ public sealed class HyperliquidProvider(HttpClient client) : IMarketDataProvider
     }
 }
 
+/// <summary>Aggregates raw equity minute bars within explicit sessions and normalizes supported corporate actions.</summary>
 public sealed class AlpacaProvider(HttpClient client, string keyId, string secret, IReadOnlyList<MarketSession> sessions, string feed = "iex") : IMarketDataProvider
 {
+    /// <summary>Gets the provider identity used for provenance and cache partitioning.</summary>
     public string Name => "alpaca-" + feed;
+    /// <summary>Creates an authenticated Alpaca GET request for each retry; the caller owns the returned document.</summary>
     private Task<JsonDocument> Get(string url, CancellationToken token) => ProviderHttp.SendAsync(client, () =>
     {
         var message = new HttpRequestMessage(HttpMethod.Get, url);
         message.Headers.Add("APCA-API-KEY-ID", keyId); message.Headers.Add("APCA-API-SECRET-KEY", secret);
         return message;
     }, token);
+    /// <summary>Fetches supported hourly or daily history and normalizes provider records for the requested asset class.</summary>
     public async Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default)
     {
         if (request.Instrument.AssetClass != AssetClass.Equity) throw new ArgumentException("Alpaca adapter requires equities.");
@@ -113,6 +124,7 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
         return new() { Provider = Name, Version = request.Version, Interval = request.Interval, Bars = bars, Sessions = sessions.ToList(), CorporateActions = actions,
             Notes = ["Regular-session aggregation of raw minute bars; missing trade minutes are not synthesized. Corporate action API filters process dates; verify effective-date coverage with supplementary events."] };
     }
+    /// <summary>Fetches process-date-filtered actions and resolves supported terms at effective session opens; incomplete or unsupported terms fail.</summary>
     public async Task<List<CorporateAction>> CorporateActionsAsync(DataRequest request, CancellationToken token = default)
     {
         var result = new List<CorporateAction>(); string? page = null;
@@ -125,7 +137,9 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
             foreach (var group in doc.RootElement.GetProperty("corporate_actions").EnumerateObject())
                 foreach (var row in group.Value.EnumerateArray())
                 {
+                    // Read a required string field from the current corporate-action row, rejecting null values.
                     string S(string name) => row.GetProperty(name).GetString() ?? throw new InvalidDataException($"Corporate action missing {name}.");
+                    // Read a decimal corporate-action field whether encoded as a string or number.
                     decimal N(string name) => ProviderHttp.Number(row, name);
                     var sourceField = group.Name is "cash_mergers" or "stock_mergers" or "stock_and_cash_mergers" ? "acquiree_symbol"
                         : group.Name == "name_changes" ? "old_symbol" : "symbol";
@@ -154,6 +168,7 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
         } while (page is not null);
         return result;
     }
+    /// <summary>Fetches exchange sessions and converts New York local boundaries to UTC with daylight-saving rules.</summary>
     public static async Task<List<MarketSession>> CalendarAsync(HttpClient client, string keyId, string secret, DateOnly start, DateOnly end, CancellationToken token = default)
     {
         var provider = new AlpacaProvider(client, keyId, secret, []);
@@ -161,6 +176,7 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
         var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
         return doc.RootElement.EnumerateArray().Select(row =>
         {
+            // Combine the calendar date and local session time, then apply New York daylight-saving rules to obtain UTC.
             DateTimeOffset ConvertTime(string field)
             {
                 var local = DateTime.Parse(row.GetProperty("date").GetString() + "T" + row.GetProperty(field).GetString(), CultureInfo.InvariantCulture);

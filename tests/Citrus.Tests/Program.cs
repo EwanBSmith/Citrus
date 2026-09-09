@@ -7,17 +7,26 @@ using Citrus.Data;
 using Citrus.Engine;
 using Citrus.Simulation;
 
+// Keep regression checks offline and package-free; named actions are executed by the runner below.
 var tests = new List<(string Name, Action Test)>();
 var instrument = new Instrument("test", AssetClass.LinearPerpetual, "BTC");
 var start = DateTimeOffset.Parse("2024-01-01T00:00:00Z");
+// Build hourly perpetual bars with the supplied open/close prices and a fixed intrabar price range.
 MarketDataset Data(params decimal[] prices) => new() { Interval = BarInterval.Hourly, Bars = prices.Select((p, i) =>
     new Bar(instrument, start.AddHours(i), start.AddHours(i + 1), p, p + 5, p - 5, p, 1000)).ToList() };
+// Create a small-capital run configuration with zero borrow by default unless options are supplied.
 RunConfiguration Config(SimulationOptions? simulation = null) => new() { InitialCash = 1000, Simulation = simulation ?? new() { AnnualBorrowRate = 0 } };
+// Register a named regression action for the package-free test runner.
 void Test(string name, Action action) => tests.Add((name, action));
+// Fail unless expected and actual values match under the default equality comparer.
 void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"Expected {expected}, got {actual}."); }
+// Fail with the supplied reason when the asserted condition is false.
 void True(bool condition, string reason = "Assertion failed") { if (!condition) throw new Exception(reason); }
+// Require the action to throw the specified exception type, allowing derived exception types.
 void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new Exception($"Expected {typeof(T).Name}."); }
+// Run a fixture strategy against supplied data or the default three-bar scenario.
 BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOptions? options = null) => new BacktestEngine().Run(strategy, data ?? Data(100, 110, 120), Config(options));
+// Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
 Test("Market decisions see only completed bars and fill next open", () =>
@@ -80,6 +89,7 @@ Test("Maintenance breach liquidates at observed opening gap", () =>
 });
 Test("Seeded rejection is reproducible with both outcomes", () =>
 {
+    // Create a fresh strategy that submits on every bar to compare seeded rejection sequences.
     CallbackStrategy Strategy() => new(onBar: (c, _) => c.Submit(new("a", instrument, 1)));
     var data = Data(Enumerable.Repeat(100m, 100).ToArray()); var options = new SimulationOptions { RejectionProbability = 0.5 };
     var one = Run(Strategy(), data, options); var two = Run(Strategy(), data, options);
@@ -87,6 +97,7 @@ Test("Seeded rejection is reproducible with both outcomes", () =>
 });
 Test("Equivalent backtest and fake live-context decisions", () =>
 {
+    // Create the same first-bar decision independently for each execution-mode comparison.
     CallbackStrategy Strategy() => new(onBar: (c, _) => { if (c.History(instrument, 100).Count == 1) c.Submit(new("a", instrument, 2)); });
     var engine = new BacktestEngine(); var backtest = engine.Run(Strategy(), Data(100, 110), Config()); var live = engine.Run(Strategy(), Data(100, 110), Config(), ExecutionMode.Live);
     Equal(JsonSerializer.Serialize(backtest.Orders), JsonSerializer.Serialize(live.Orders));
@@ -182,6 +193,7 @@ Test("Repeated exports replace results and inputs while retaining unrelated file
 
 // Explicit sessions keep holiday and DST behavior independent of the host timezone.
 var equity = new Instrument("alpaca", AssetClass.Equity, "ABC");
+// Build equity bars against explicit sessions spanning a weekend and daylight-saving transition.
 MarketDataset Equities() => new() { Bars = [
     new(equity, DateTimeOffset.Parse("2024-03-08T14:30:00Z"), DateTimeOffset.Parse("2024-03-08T21:00:00Z"), 100, 100, 100, 100, 1000, true, true),
     new(equity, DateTimeOffset.Parse("2024-03-11T13:30:00Z"), DateTimeOffset.Parse("2024-03-11T20:00:00Z"), 50, 50, 50, 50, 1000, true, true)],
@@ -424,27 +436,38 @@ foreach (var (name, test) in tests)
 Console.WriteLine($"{tests.Count - failures}/{tests.Count} tests passed.");
 return failures == 0 ? 0 : 1;
 
+/// <summary>Adapts optional test callbacks to strategy events after registering a default account.</summary>
 sealed class CallbackStrategy(Action<IStrategyContext>? onStart = null, Action<IStrategyContext, IReadOnlyList<Bar>>? onBar = null,
     Action<IStrategyContext, string>? onScheduled = null, decimal weight = 1) : IStrategy
 {
+    /// <summary>Registers the default account and invokes the optional startup test callback.</summary>
     public void OnStart(IStrategyContext context) { context.Register("a", weight); onStart?.Invoke(context); }
+    /// <summary>Forwards completed bars to the optional test callback.</summary>
     public void OnBar(IStrategyContext context, IReadOnlyList<Bar> bars) => onBar?.Invoke(context, bars);
+    /// <summary>Forwards a named scheduled event to the optional test callback.</summary>
     public void OnScheduled(IStrategyContext context, string name) => onScheduled?.Invoke(context, name);
 }
+/// <summary>Serves in-memory bars and records requested ranges for cache regression checks.</summary>
 sealed class FixtureProvider(MarketDataset data) : IMarketDataProvider
 {
     public string Name => "fixture";
     public List<DataRequest> Requests { get; } = [];
+    /// <summary>Records the request and returns fixture bars contained in its requested interval without network I/O.</summary>
     public Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default)
     { Requests.Add(request); return Task.FromResult(data with { Bars = data.Bars.Where(b => b.OpenTime >= request.Start && b.CloseTime <= request.End).ToList() }); }
 }
+/// <summary>Routes HTTP requests to an in-memory response factory for offline adapter tests.</summary>
 sealed class ResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
 {
+    /// <summary>Returns the response supplied by the fixture delegate without opening a network connection.</summary>
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(respond(request));
 }
+/// <summary>Exercises many substrategies, history lookups, indicators, and initial orders for explicit benchmarks.</summary>
 sealed class BenchmarkStrategy : IStrategy
 {
+    /// <summary>Registers twenty equal-capital substrategies for the benchmark workload.</summary>
     public void OnStart(IStrategyContext c) { for (var i = 0; i < 20; i++) c.Register($"s{i}", 0.05m); }
+    /// <summary>Computes each substrategy indicator and submits one small order per instrument on its first bar.</summary>
     public void OnBar(IStrategyContext c, IReadOnlyList<Bar> bars)
     {
         for (var i = 0; i < 20; i++) foreach (var bar in bars)
@@ -454,10 +477,14 @@ sealed class BenchmarkStrategy : IStrategy
         }
     }
 }
+/// <summary>Records callback ordering for an order submitted during startup.</summary>
 sealed class NotificationStrategy(Instrument instrument) : IStrategy
 {
     public readonly List<string> Notifications = [];
+    /// <summary>Registers an account and submits a one-unit order to exercise notification delivery.</summary>
     public void OnStart(IStrategyContext c) { c.Register("a", 1); c.Submit(new("a", instrument, 1)); }
+    /// <summary>Records the delivered status name so the test can compare callback order.</summary>
     public void OnOrderUpdate(IStrategyContext c, OrderUpdate update) => Notifications.Add(update.Status.ToString());
+    /// <summary>Records fill delivery in the same sequence as order status callbacks.</summary>
     public void OnFill(IStrategyContext c, Fill fill) => Notifications.Add("Fill");
 }

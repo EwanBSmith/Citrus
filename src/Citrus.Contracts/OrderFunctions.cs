@@ -43,6 +43,7 @@ public static class OrderFunctions
         decimal quantity, TimeInForce timeInForce = TimeInForce.GoodTillCancelled)
         => Place(context, substrategy, instrument, quantity, true, OrderType.MarketOnClose, null, timeInForce);
 
+    /// <summary>Validates positive helper arguments, converts the side to a signed quantity, and submits the order.</summary>
     private static long Place(IStrategyContext context, string substrategy, Instrument instrument, decimal quantity,
         bool sell, OrderType type, decimal? limitPrice, TimeInForce timeInForce)
     {

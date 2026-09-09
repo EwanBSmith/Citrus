@@ -6,9 +6,12 @@ using Citrus.Contracts;
 
 namespace Citrus.Engine;
 
+/// <summary>Reports fractional return and drawdown, annualized Sharpe, and the number of usable daily returns; undefined metrics are null.</summary>
 public sealed record Performance(decimal? TotalReturn, decimal MaximumDrawdown, double? AnnualizedSharpe, int DailyObservations);
+/// <summary>Calculates performance and exports results with portable replay inputs and provenance hashes.</summary>
 public static class Reports
 {
+    /// <summary>Computes drawdown over ordered observations and sample-deviation Sharpe from UTC daily closing equity after the initial observation.</summary>
     public static Performance Metrics(IEnumerable<(DateTimeOffset Time, decimal Equity)> observations, decimal riskFreeRate, int annualDays)
     {
         var values = observations.ToArray();
@@ -19,6 +22,7 @@ public static class Reports
             peak = Math.Max(peak, value.Equity);
             if (peak > 0) drawdown = Math.Max(drawdown, (peak - value.Equity) / peak);
         }
+        // The first observation is the capital baseline, not a daily close; intraday points still affect drawdown.
         var days = values.Skip(1).GroupBy(v => v.Time.UtcDateTime.Date).Select(g => g.Last().Equity).ToArray();
         var returns = new List<double>();
         var previous = values[0].Equity;
@@ -37,6 +41,7 @@ public static class Reports
         return new(values[0].Equity > 0 ? values[^1].Equity / values[0].Equity - 1 : null, drawdown, sharpe, returns.Count);
     }
 
+    /// <summary>Writes JSON/CSV results and captured replay inputs, replacing matching output files while retaining unrelated files.</summary>
     public static void Export(string directory, BacktestResult result, RunConfiguration configuration, MarketDataset data,
         string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes)
     {
@@ -89,6 +94,7 @@ public static class Reports
         }
         Json.Write(Path.Combine(replay, "run.json"), configuration with { Strategy = "strategy.cs", Data = "data.json", Output = "../replay", References = references.ToArray(), ReplaySnapshots = "snapshots.json" });
         Json.Write(Path.Combine(replay, "snapshots.json"), result.ExternalSnapshots);
+        // Compute the file SHA-256 digest used to identify captured inputs and runtime components.
         string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
         Json.Write(Path.Combine(directory, "manifest.json"), new
         {
@@ -108,15 +114,18 @@ public static class Reports
             data.Provider, data.Version, data.Notes
         });
     }
+    /// <summary>Copies and overwrites a replay input unless source and destination resolve to the same platform-aware path.</summary>
     private static void CopyInput(string source, string destination)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), comparison))
             File.Copy(source, destination, overwrite: true);
     }
+    /// <summary>Writes a UTF-8 CSV with quoted headers and values, invariant numbers, and round-trip timestamps.</summary>
     private static void Csv(string path, string[] headers, IEnumerable<object?[]> rows)
     {
         using var writer = new StreamWriter(path, false, new UTF8Encoding(false));
+        // Format one CSV field, doubling embedded quotes and representing null as an empty field.
         string Format(object? value)
         {
             var text = value switch { null => "", DateTimeOffset t => t.ToString("O"), IFormattable f => f.ToString(null, CultureInfo.InvariantCulture), _ => value.ToString()! };

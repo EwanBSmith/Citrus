@@ -4,14 +4,18 @@ using Citrus.Simulation;
 
 namespace Citrus.Engine;
 
+/// <summary>Records portfolio and substrategy valuation at one simulation observation time.</summary>
 public sealed record EquityPoint(DateTimeOffset Time, decimal Cash, decimal Equity, decimal GrossExposure,
     IReadOnlyDictionary<string, decimal> Substrategies);
+/// <summary>Collects completed-run execution history, valuations, captured external inputs, and final attribution.</summary>
 public sealed record BacktestResult(IReadOnlyList<OrderUpdate> Orders, IReadOnlyList<Fill> Fills,
     IReadOnlyList<CashMovement> Costs, IReadOnlyList<EquityPoint> Equity, PortfolioSnapshot Final,
     IReadOnlyDictionary<string, byte[]> ExternalSnapshots, IReadOnlyList<InstrumentAttribution> Attribution);
 
+/// <summary>Runs a sequential event simulation over validated market data with deterministic event ordering.</summary>
 public sealed class BacktestEngine
 {
+    /// <summary>Validates inputs and runs a trusted strategy to completion; supplied snapshots enable replay, and mode only labels the strategy context.</summary>
     public BacktestResult Run(IStrategy strategy, MarketDataset data, RunConfiguration configuration,
         ExecutionMode mode = ExecutionMode.Backtest, IReadOnlyDictionary<string, byte[]>? snapshots = null)
     {
@@ -36,6 +40,7 @@ public sealed class BacktestEngine
         context.Time = first.AddTicks(-1);
         var points = new List<EquityPoint>();
         var notificationIndex = 0;
+        // Deliver queued notifications in order, including callback-generated events, with a per-dispatch loop limit.
         void Dispatch()
         {
             // Bound callback-generated notifications to catch accidental infinite submission loops.
@@ -48,6 +53,7 @@ public sealed class BacktestEngine
                 else strategy.OnOrderUpdate(context, book.Updates[notification.Index]);
             }
         }
+        // Append portfolio and substrategy valuations at the current event time.
         void Snapshot() { var p = ledger.Snapshot(context.Time); points.Add(new(p.Time, p.Cash, p.Equity, p.GrossExposure, ledger.AttributedEquity())); }
         strategy.OnStart(context);
         context.Started = true;
@@ -60,6 +66,7 @@ public sealed class BacktestEngine
                 foreach (var scheduled in context.Scheduled.Keys.Where(t => t <= last)) times.Add(scheduled);
                 var time = times.Min; times.Remove(time); context.Time = time;
                 ledger.ChargeBorrow(time, time - previous, configuration.Simulation.AnnualBorrowRate); previous = time;
+                // Settle closing bars before actions and callbacks; same-time opens run only after decisions.
                 if (closes.TryGetValue(time, out var closing))
                 {
                     foreach (var bar in closing) ledger.Mark(bar.Instrument, bar.Close);
@@ -71,6 +78,7 @@ public sealed class BacktestEngine
                 Dispatch();
                 if (closing is not null)
                 {
+                    // Publish history only once the entire closing batch has completed execution and accounting.
                     foreach (var bar in closing) context.Add(bar);
                     strategy.OnBar(context, closing);
                 }
@@ -97,6 +105,7 @@ public sealed class BacktestEngine
         return new(book.Updates, book.Fills, ledger.Movements, points, ledger.Snapshot(context.Time), context.Snapshots, ledger.Attribution());
     }
 
+    /// <summary>Implements strategy operations against the ledger and order book while retaining completed history and replay state.</summary>
     private sealed class Context(Ledger ledger, OrderBook book, int maximumSubstrategies, ExecutionMode mode,
         IReadOnlyDictionary<string, byte[]>? snapshots) : IStrategyContext
     {
@@ -110,23 +119,29 @@ public sealed class BacktestEngine
         public PortfolioSnapshot Portfolio => ledger.Snapshot(Time);
         public IReadOnlyList<OrderUpdate> OpenOrders => book.Pending.Select(o => new OrderUpdate(o.Id,
             o.Request with { Quantity = o.Remaining }, OrderStatus.Accepted, o.Submitted)).ToArray();
+        /// <summary>Registers initial capital allocation only during startup and within the configured account limit.</summary>
         public void Register(string substrategy, decimal capitalWeight)
         {
             if (Started || ledger.Count >= maximumSubstrategies) throw new InvalidOperationException("Register substrategies during startup within the configured limit.");
             ledger.Register(substrategy, capitalWeight);
         }
+        /// <summary>Returns a copy of up to count completed bars for an instrument, rejecting negative counts.</summary>
         public IReadOnlyList<Bar> History(Instrument instrument, int count)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(count);
             return history.TryGetValue(instrument, out var values) ? values.TakeLast(count).ToArray() : [];
         }
+        /// <summary>Appends a completed bar to the history exposed to strategy callbacks.</summary>
         public void Add(Bar bar)
         {
             if (!history.TryGetValue(bar.Instrument, out var values)) history.Add(bar.Instrument, values = []);
             values.Add(bar);
         }
+        /// <summary>Submits an order at the current simulation time, rejecting submissions once shutdown begins.</summary>
         public long Submit(OrderRequest order) => !Stopping ? book.Submit(order, Time) : throw new InvalidOperationException("Run is stopping.");
+        /// <summary>Cancels a pending order at the current simulation time and reports whether it was found.</summary>
         public bool Cancel(long orderId) => book.Cancel(orderId, Time);
+        /// <summary>Submits market deltas toward a complete target portfolio using completed prices and accounting for pending units.</summary>
         public void Rebalance(string substrategy, IReadOnlyDictionary<Instrument, decimal> weights)
         {
             var equity = ledger.SubstrategyEquity(substrategy);
@@ -137,16 +152,19 @@ public sealed class BacktestEngine
                 if (!history.TryGetValue(instrument, out var bars) || bars.Count == 0) throw new InvalidOperationException("Rebalancing requires an observed completed price.");
                 var desired = equity * weights.GetValueOrDefault(instrument) / bars[^1].Close;
                 var pending = book.Pending.Where(o => o.Request.Substrategy == substrategy && o.Request.Instrument == instrument).Sum(o => o.Remaining);
+                // Pending units already move toward the target, so repeated rebalances must not duplicate them.
                 var delta = desired - ledger.Quantity(substrategy, instrument) - pending;
                 if (Math.Abs(delta) > 0.00000001m) Submit(new(substrategy, instrument, delta));
             }
         }
+        /// <summary>Queues a named callback at a strictly future UTC time, preserving insertion order for equal times.</summary>
         public void Schedule(DateTimeOffset time, string name)
         {
             if (time.Offset != TimeSpan.Zero || time <= Time || string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Scheduled events require a future UTC time and name.");
             if (!Scheduled.TryGetValue(time, out var names)) Scheduled.Add(time, names = []);
             names.Add(name);
         }
+        /// <summary>Returns a defensive copy of captured bytes, fetching once in capture mode and failing on missing replay keys.</summary>
         public byte[] ExternalData(string key, Func<byte[]> fetch)
         {
             if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("Snapshot key required.");

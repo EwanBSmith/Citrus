@@ -7,22 +7,30 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace Citrus.Engine;
 
+/// <summary>Owns a trusted compiled strategy and its collectible assembly load context.</summary>
 public sealed class CompiledStrategy : IDisposable
 {
+    /// <summary>Loads explicit strategy dependencies in a collectible context while sharing the host contract assembly.</summary>
     private sealed class StrategyLoadContext(IReadOnlyList<string> references) : AssemblyLoadContext(isCollectible: true)
     {
+        /// <summary>Resolves the shared strategy contract or an explicit dependency, deferring other assemblies to default resolution.</summary>
         protected override Assembly? Load(AssemblyName assemblyName)
         {
+            // Share the host contract assembly so strategy instances retain the same IStrategy type identity.
             if (assemblyName.Name == typeof(IStrategy).Assembly.GetName().Name) return typeof(IStrategy).Assembly;
             var path = references.FirstOrDefault(p => AssemblyName.GetAssemblyName(p).Name == assemblyName.Name);
             return path is null ? null : LoadFromAssemblyPath(path);
         }
     }
     private readonly AssemblyLoadContext context;
+    /// <summary>Gets the instantiated strategy defined by the source file.</summary>
     public IStrategy Strategy { get; }
+    /// <summary>Gets SHA-256 hashes keyed by absolute explicit dependency paths for replay provenance.</summary>
     public IReadOnlyDictionary<string, string> DependencyHashes { get; }
+    /// <summary>Retains the load context, strategy instance, and dependency hashes for execution and disposal.</summary>
     private CompiledStrategy(AssemblyLoadContext context, IStrategy strategy, IReadOnlyDictionary<string, string> hashes)
     { this.context = context; Strategy = strategy; DependencyHashes = hashes; }
+    /// <summary>Compiles source and loads exactly one concrete strategy with a public parameterless constructor; compilation and loading failures propagate.</summary>
     public static CompiledStrategy Load(string sourcePath, IEnumerable<string>? references = null)
     {
         var paths = (references ?? []).Select(Path.GetFullPath).ToArray();
@@ -47,5 +55,6 @@ public sealed class CompiledStrategy : IDisposable
         }
         catch { context.Unload(); throw; }
     }
+    /// <summary>Requests unloading of the strategy assembly context; collection requires outstanding references to be released.</summary>
     public void Dispose() => context.Unload();
 }

@@ -27,6 +27,8 @@ try
     {
         var configPath = Path.GetFullPath(args[1]);
         var root = Path.GetDirectoryName(configPath)!;
+        // Resolve all run inputs together so captured configurations remain portable for replay.
+        // Return an absolute path using the configuration directory as the base for relative paths.
         string Resolve(string path) => Path.GetFullPath(path, root);
         var config = Json.Read<RunConfiguration>(configPath);
         var strategy = Resolve(config.Strategy); var dataPath = Resolve(config.Data); var output = Resolve(config.Output);
@@ -97,8 +99,10 @@ catch (Exception exception)
     Console.Error.WriteLine("Citrus: " + message); return 1;
 }
 
+/// <summary>Defines synthetic price generation inputs, including explicit sessions for equities.</summary>
 internal sealed record Generation(Instrument Instrument, BarInterval Interval, DateTimeOffset Start, int Count, int Seed = 42,
     decimal InitialPrice = 100, double AnnualDrift = 0.05, double AnnualVolatility = 0.2, List<MarketSession>? Sessions = null);
+/// <summary>Defines provider download settings and a cache path relative to the configuration file.</summary>
 internal sealed record Download(string Provider, DataRequest Request, string Cache = ".cache", string Feed = "iex")
 {
     public List<MarketSession> Sessions { get; init; } = [];

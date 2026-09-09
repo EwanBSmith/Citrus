@@ -2,24 +2,35 @@ using Citrus.Contracts;
 
 namespace Citrus.Simulation;
 
+/// <summary>Tracks an accepted request and its mutable signed unfilled quantity.</summary>
 public sealed class PendingOrder(long id, OrderRequest request, DateTimeOffset submitted)
 {
+    /// <summary>Gets the simulation-assigned order identifier.</summary>
     public long Id { get; } = id;
+    /// <summary>Gets or sets the request, including adjustments made for stock splits.</summary>
     public OrderRequest Request { get; set; } = request;
+    /// <summary>Gets the submission time used to determine event eligibility.</summary>
     public DateTimeOffset Submitted { get; } = submitted;
+    /// <summary>Gets or sets signed units still awaiting execution.</summary>
     public decimal Remaining { get; set; } = request.Quantity;
 }
 
+/// <summary>Simulates eligible order crossing, external residual execution, costs, rejection, and margin liquidation.</summary>
 public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed)
 {
     private readonly Random random = new(seed);
     private long nextId;
     private readonly List<PendingOrder> pending = [];
     private readonly HashSet<Instrument> retired = [];
+    /// <summary>Gets notification order as indexes into the fill or update lists for sequential callback dispatch.</summary>
     public List<(bool IsFill, int Index)> Notifications { get; } = [];
+    /// <summary>Gets order status changes in creation order.</summary>
     public List<OrderUpdate> Updates { get; } = [];
+    /// <summary>Gets attributed executions, including internal transfers and forced liquidation fills.</summary>
     public List<Fill> Fills { get; } = [];
+    /// <summary>Gets accepted orders that still have an unfilled balance.</summary>
     public IReadOnlyList<PendingOrder> Pending => pending;
+    /// <summary>Validates a request and assigns an ID; retired instruments produce a rejection update.</summary>
     public long Submit(OrderRequest request, DateTimeOffset time)
     {
         if (!Enum.IsDefined(request.Type) || !Enum.IsDefined(request.TimeInForce) || !Enum.IsDefined(request.Instrument.AssetClass))
@@ -40,7 +51,9 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
         Update(new(id, request, OrderStatus.Accepted, time));
         return id;
     }
+    /// <summary>Appends a status update and its notification index, preserving callback order relative to fills.</summary>
     private void Update(OrderUpdate update) { Notifications.Add((false, Updates.Count)); Updates.Add(update); }
+    /// <summary>Removes a pending order and records cancellation, returning false when the ID is not pending.</summary>
     public bool Cancel(long id, DateTimeOffset time, string reason = "Cancelled")
     {
         var order = pending.Find(o => o.Id == id);
@@ -48,11 +61,13 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
         Finish(order, OrderStatus.Cancelled, time, reason);
         return true;
     }
+    /// <summary>Records a terminal status and removes the order from the pending book.</summary>
     private void Finish(PendingOrder order, OrderStatus status, DateTimeOffset time, string? reason = null)
     {
         Update(new(order.Id, order.Request, status, time, reason));
         pending.Remove(order);
     }
+    /// <summary>Adjusts split orders or cancels and retires instruments that undergo conversion or delisting.</summary>
     public void ApplyAction(CorporateAction action)
     {
         if (action.Type is ActionType.Merger or ActionType.Delisting or ActionType.SymbolChange) retired.Add(action.Instrument);
@@ -67,6 +82,7 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
                 Cancel(order.Id, action.Time, "Corporate action: resubmit on successor instrument");
         }
     }
+    /// <summary>Executes orders eligible at the bar open or close and expires day orders at their applicable boundary.</summary>
     public void Execute(Bar bar, bool atClose)
     {
         var time = atClose ? bar.CloseTime : bar.OpenTime;
@@ -105,6 +121,7 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
             foreach (var order in pending.Where(o => o.Request.Instrument == bar.Instrument && o.Request.TimeInForce == TimeInForce.Day && o.Submitted < time).ToArray())
                 Cancel(order.Id, time, "Day order expired");
     }
+    /// <summary>Matches opposing virtual quantities in array order at a common price without external commissions.</summary>
     private void Cross(PendingOrder[] orders, decimal price, DateTimeOffset time)
     {
         var buys = orders.Where(o => o.Remaining > 0).ToArray();
@@ -119,6 +136,7 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
             if (sells[s].Remaining == 0) s++;
         }
     }
+    /// <summary>Prices and risk-checks the net residual, then rejects it or allocates external fills and commission across its orders.</summary>
     private void Route(PendingOrder[] orders, decimal reference, DateTimeOffset time, decimal? limit)
     {
         if (orders.Length == 0) return;
@@ -144,6 +162,7 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
             foreach (var order in orders) Finish(order, OrderStatus.Rejected, time, reason);
             return;
         }
+        // Give the final fill the decimal remainder so attributed commissions sum exactly to the net charge.
         var remainingCost = commission;
         for (var index = 0; index < orders.Length; index++)
         {
@@ -153,11 +172,13 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
             FillOrder(order, order.Remaining, price, cost, false, time, Math.Abs(order.Remaining) * Math.Abs(price - reference));
         }
     }
+    /// <summary>Books an attributed fill, queues its notification, and reduces the signed unfilled quantity.</summary>
     private void FillOrder(PendingOrder order, decimal quantity, decimal price, decimal cost, bool internalFill, DateTimeOffset time, decimal executionCost = 0)
     {
         var fill = new Fill(order.Id, order.Request.Substrategy, order.Request.Instrument, time, quantity, price, cost, internalFill, ExecutionCost: executionCost);
         ledger.Apply(fill); Notifications.Add((true, Fills.Count)); Fills.Add(fill); order.Remaining -= quantity;
     }
+    /// <summary>On a maintenance breach, cancels pending orders and closes all positions with internal crossing and costed external residuals.</summary>
     public void Liquidate(DateTimeOffset time)
     {
         if (ledger.Snapshot(time).Equity >= ledger.Margin(options, true)) return;
