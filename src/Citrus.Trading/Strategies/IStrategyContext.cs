@@ -1,0 +1,28 @@
+namespace Citrus.Trading;
+
+/// <summary>Provides strategy access to simulated time, portfolio state, orders, completed history, and captured external data.</summary>
+public interface IStrategyContext
+{
+    /// <summary>Gets the execution mode reported by the host.</summary>
+    ExecutionMode Mode { get; }
+    /// <summary>Gets the current simulation time in UTC.</summary>
+    DateTimeOffset Time { get; }
+    /// <summary>Gets a current portfolio snapshot including each substrategy position.</summary>
+    PortfolioSnapshot Portfolio { get; }
+    /// <summary>Gets pending orders with request quantities set to their signed unfilled balances.</summary>
+    IReadOnlyList<OrderUpdate> OpenOrders { get; }
+    /// <summary>Allocates a positive fraction of initial capital during startup; names must be unique and total weights at most one.</summary>
+    void Register(string substrategy, decimal capitalWeight);
+    /// <summary>Returns up to count completed bars in chronological order as a copy; count must be nonnegative.</summary>
+    IReadOnlyList<Bar> History(Instrument instrument, int count);
+    /// <summary>Submits an additional signed-quantity order and returns its ID; acceptance does not guarantee execution.</summary>
+    long Submit(OrderRequest order);
+    /// <summary>Cancels a pending order by ID, returning false if it is no longer pending.</summary>
+    bool Cancel(long orderId);
+    /// <summary>Targets a complete substrategy portfolio using current equity and completed prices; omitted holdings target zero and pending quantities count toward targets.</summary>
+    void Rebalance(string substrategy, IReadOnlyDictionary<Instrument, decimal> weights);
+    /// <summary>Schedules a named callback at a future UTC time; times beyond the run do not execute.</summary>
+    void Schedule(DateTimeOffset time, string name);
+    /// <summary>Captures fetched bytes once per key and returns copies; replay requires the key in supplied snapshots and never fetches missing data.</summary>
+    byte[] ExternalData(string key, Func<byte[]> fetch);
+}

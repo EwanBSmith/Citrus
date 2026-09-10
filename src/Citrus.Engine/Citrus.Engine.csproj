@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <ProjectReference Include="../Citrus.Contracts/Citrus.Contracts.csproj" />
+    <ProjectReference Include="../Citrus.Trading/Citrus.Trading.csproj" />
     <ProjectReference Include="../Citrus.Simulation/Citrus.Simulation.csproj" />
     <ProjectReference Include="../Citrus.Data/Citrus.Data.csproj" />
     <Reference Include="Microsoft.CodeAnalysis"><HintPath>$(MSBuildToolsPath)/Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath><Private>true</Private></Reference>

@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="src/Citrus.Contracts/Citrus.Contracts.csproj" />
+  <Project Path="src/Citrus.Trading/Citrus.Trading.csproj" />
   <Project Path="src/Citrus.Simulation/Citrus.Simulation.csproj" />
   <Project Path="src/Citrus.Data/Citrus.Data.csproj" />
   <Project Path="src/Citrus.Engine/Citrus.Engine.csproj" />

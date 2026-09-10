@@ -1,4 +1,4 @@
-using Citrus.Contracts;
+using Citrus.Trading;
 
 namespace Citrus.Simulation;
 

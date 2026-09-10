@@ -1,6 +1,6 @@
-namespace Citrus.Contracts;
+namespace Citrus.Trading;
 
-/// <summary>Place quantity-based orders through the shared strategy execution contract.</summary>
+/// <summary>Place quantity-based orders through the strategy context.</summary>
 public static class OrderFunctions
 {
     /// <summary>Buy a positive number of units with a market order. Returns the order ID.</summary>

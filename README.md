@@ -34,7 +34,7 @@ A source file defines exactly one concrete `IStrategy` with a public parameterle
 
 ```csharp
 using System.Collections.Generic;
-using Citrus.Contracts;
+using Citrus.Trading;
 
 public sealed class BuyAndHold : IStrategy
 {
@@ -83,7 +83,7 @@ Alpaca supplies exchange calendar sessions, raw minute bars aggregated into regu
 
 Hyperliquid downloads hourly/daily candles and paginated funding rates. Its API supplies only the latest 5,000 candles; missing history fails with a coverage error. Import older data and merge datasets instead of silently shortening the requested period. Its funding history does not include historical mark prices: the adapter uses the latest completed candle close, or the first open at dataset start. This approximation is recorded in dataset notes and the manifest; import funding events with explicit historical marks for exact funding notionals.
 
-The JSON dataset format is defined by `MarketDataset` in `Citrus.Contracts`. It contains `schemaVersion`, `provider`, `version`, `interval`, `bars`, `sessions`, `corporateActions`, `funding`, and `notes`. Generated files are complete examples. Supplement files may contain only events and an empty bar array; import validates the combined dataset. Duplicate bars/events fail. A successor instrument's price history must be present for a backtest containing a stock merger or symbol change.
+The JSON dataset format is defined by `MarketDataset` in `Citrus.Data`. It contains `schemaVersion`, `provider`, `version`, `interval`, `bars`, `sessions`, `corporateActions`, `funding`, and `notes`. Generated files are complete examples. Supplement files may contain only events and an empty bar array; import validates the combined dataset. Duplicate bars/events fail. A successor instrument's price history must be present for a backtest containing a stock merger or symbol change.
 
 Cache entries are keyed by provider/feed, venue, asset class, symbol, interval, and version. Valid existing bars are reused and only missing ranges fetched. Writes replace cache files atomically. Use a new explicit data version to refresh historical revisions. Cache use is single-writer; do not run concurrent downloads into the same cache. The engine validates interior coverage for each instrument's supplied range; imports do not establish unavailable history outside those boundaries.
 
@@ -105,7 +105,17 @@ This writes to `artifacts/perpetual-result/replay`. Compare fills and equity, ra
 
 ## Design and verification
 
-Read [simulation rules](docs/simulation.md) and [requirement traceability](docs/requirements-traceability.md) before interpreting results. The implementation is split into Contracts, Simulation, Data, Engine, CLI, and Tests projects. Contracts do not depend on Roslyn, storage, or a venue, permitting a later interpreted execution host. Live adapters, optimisation/walk-forward, and GUI remain future releases.
+Read [simulation rules](docs/simulation.md) and [requirement traceability](docs/requirements-traceability.md) before interpreting results. The implementation is organised around trading and backtesting responsibilities:
+
+- **Citrus.Trading** contains instruments, market data events, orders, portfolio records, and the strategy API. Its folders are Instruments, MarketData, Orders, Portfolio, and Strategies; all public types share the `Citrus.Trading` namespace so strategies need one import. This assembly has no dependency on storage, Roslyn, or simulation.
+- **Citrus.Data** owns datasets, providers, validation, caching, and JSON persistence.
+- **Citrus.Simulation** owns order execution, portfolio accounting, and `SimulationOptions`.
+- **Citrus.Engine** owns `RunConfiguration`, strategy compilation, backtest coordination, and reports.
+- **Citrus.Cli** handles commands and paths; **Citrus.Tests** verifies behaviour.
+
+When updating an existing strategy, replace `using Citrus.Contracts;` with `using Citrus.Trading;`. External projects must update their project/assembly reference to `Citrus.Trading` and rebuild. Consumers of `MarketDataset` or `Json` now import `Citrus.Data`, consumers of `SimulationOptions` import `Citrus.Simulation`, and consumers of `RunConfiguration` import `Citrus.Engine`. JSON formats and trading behaviour are unchanged. Previously captured strategy sources also need the import updated before recompilation; existing manifests retain their original hashes.
+
+Live adapters, optimisation/walk-forward, and GUI remain future releases.
 
 Run benchmarks explicitly:
 
