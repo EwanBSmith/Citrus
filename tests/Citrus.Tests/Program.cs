@@ -43,15 +43,14 @@ Test("Substrategy limit is not a configuration setting", () =>
     Throws<JsonException>(() => JsonSerializer.Deserialize<RunConfiguration>("{\"maximumSubstrategies\":200}", Json.Options));
     True(!JsonSerializer.Serialize(Config(), Json.Options).Contains("maximumSubstrategies", StringComparison.OrdinalIgnoreCase));
 });
-Test("Tradable universe persists and restricts orders while retaining signal data", () =>
+Test("Strategies can observe and trade all dataset instruments without configuration lists", () =>
 {
     var other = instrument with { Symbol = "ETH" };
     var data = Data(100, 110);
     data = data with { Bars = data.Bars.Concat(data.Bars.Select(b => b with { Instrument = other })).OrderBy(b => b.OpenTime).ToList() };
-    var config = Config() with { TradableUniverse = [instrument] };
+    var config = Config();
     var path = Path.Combine(Temporary(), "run.json"); Json.Write(path, config);
     var restored = Json.Read<RunConfiguration>(path);
-    Equal(instrument, restored.TradableUniverse!.Single());
     var observedOther = false;
     var result = new BacktestEngine().Run(new CallbackStrategy(
         onStart: c => c.Buy("a", instrument, 1),
@@ -59,32 +58,13 @@ Test("Tradable universe persists and restricts orders while retaining signal dat
         {
             observedOther |= bars.Any(b => b.Instrument == other);
             True(c.History(other, 10).Count > 0);
-            Throws<ArgumentException>(() => c.Buy("a", other, 1));
+            if (c.History(other, 2).Count == 1) c.Buy("a", other, 1);
         }), data, restored);
-    Equal(1, result.Fills.Count); True(observedOther);
-    Equal(1, new BacktestEngine().Run(new CallbackStrategy(onStart: c => c.Buy("a", other, 1)), data, Config()).Fills.Count);
+    Equal(2, result.Fills.Count); True(observedOther);
+    Equal(instrument, result.Fills[0].Instrument);
+    Equal(other, result.Fills[1].Instrument);
 });
-Test("Tradable universe rejects duplicates and absent instruments before startup", () =>
-{
-    foreach (var entries in new List<Instrument>[] { [instrument, instrument], [instrument with { Symbol = "MISSING" }], [null!] })
-    {
-        var started = false;
-        Throws<ArgumentException>(() => new BacktestEngine().Run(new CallbackStrategy(onStart: c => started = true),
-            Data(100, 110), Config() with { TradableUniverse = entries }));
-        True(!started);
-    }
-});
-Test("Empty tradable universe permits observations but no orders", () =>
-{
-    var barsSeen = 0;
-    var result = new BacktestEngine().Run(new CallbackStrategy(onBar: (c, bars) =>
-    {
-        barsSeen += bars.Count;
-        Throws<ArgumentException>(() => c.Buy("a", instrument, 1));
-    }), Data(100, 110), Config() with { TradableUniverse = [] });
-    Equal(2, barsSeen); Equal(0, result.Fills.Count);
-});
-Test("Default tradable universe rejects orders absent from the dataset", () =>
+Test("Orders require market bars for the requested instrument", () =>
 {
     Throws<ArgumentException>(() => Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument with { Symbol = "MISSING" }, 1))));
 });
@@ -477,6 +457,177 @@ if (args.Contains("--benchmark"))
     }
     return 0;
 }
+// Build November/December 2024 exchange sessions with holidays, DST and shortened holiday auctions.
+MarketDataset PaydayData(decimal price = 100m)
+{
+    var schb = new Instrument("alpaca", AssetClass.Equity, "SCHB");
+    var sessions = new List<MarketSession>();
+    var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+    for (var date = new DateTime(2024, 11, 1); date < new DateTime(2025, 1, 1); date = date.AddDays(1))
+    {
+        if (date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday || date == new DateTime(2024, 11, 28) || date == new DateTime(2024, 12, 25)) continue;
+        var early = date == new DateTime(2024, 11, 29) || date == new DateTime(2024, 12, 24);
+        sessions.Add(new(TimeZoneInfo.ConvertTimeToUtc(date.AddHours(9.5), zone), TimeZoneInfo.ConvertTimeToUtc(date.AddHours(early ? 13 : 16), zone)));
+    }
+    return new() { Sessions = sessions, Bars = sessions.Select(s => new Bar(schb, s.Open, s.Close, price, price, price, price, 10000, true, true)).ToList() };
+}
+Test("Payday compiled example trades exact sessions and early month-end closes across months", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var data = PaydayData();
+    var result = Run(compiled.Strategy, data);
+    var expected = data.Sessions.GroupBy(s => s.Open.Month).SelectMany(g => new[] { g.ElementAt(7), g.ElementAt(11), g.ElementAt(15), g.Last() }).ToArray();
+    Equal(8, result.Fills.Count);
+    for (var i = 0; i < expected.Length; i++)
+    {
+        Equal(expected[i].Close, result.Fills[i].Time);
+        Equal(i % 2 == 0 ? 8m : -8m, result.Fills[i].Quantity);
+    }
+    True(result.Final.Positions.All(p => p.Quantity == 0));
+    True(result.Orders.All(o => o.Request.Type == OrderType.MarketOnClose && o.Request.TimeInForce == TimeInForce.Day));
+});
+Test("Payday sizing uses completed prices, skips unaffordable lots, and never shorts after rejected entries", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var data = PaydayData();
+    data.Bars[7] = data.Bars[7] with { High = 110, Close = 110 };
+    var result = Run(compiled.Strategy, data);
+    Equal(8m, result.Fills[0].Quantity);
+    Equal(110m, result.Fills[0].Price);
+    Equal(0, Run(compiled.Strategy, PaydayData(900)).Orders.Count);
+    var rejected = Run(compiled.Strategy, PaydayData(), new SimulationOptions { RejectionProbability = 1 });
+    Equal(0, rejected.Fills.Count);
+    True(rejected.Orders.All(o => o.Request.Quantity > 0));
+});
+Test("Payday mid-month data uses full calendar ordinals and does not close at a truncated run boundary", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var full = PaydayData();
+    var data = full with { Bars = full.Bars.Skip(5).Take(13).ToList() };
+    var result = Run(compiled.Strategy, data);
+    Equal(3, result.Fills.Count);
+    Equal(full.Sessions[7].Close, result.Fills[0].Time);
+    Equal(full.Sessions[15].Close, result.Fills[2].Time);
+    Equal(8m, result.Final.Positions.Single().Quantity);
+});
+Test("Payday hourly input still decides once per session and matches daily input", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var daily = PaydayData();
+    var bars = new List<Bar>();
+    foreach (var session in daily.Sessions)
+        for (var open = session.Open; open < session.Close; open = open.AddHours(1))
+        {
+            var close = open.AddHours(1) < session.Close ? open.AddHours(1) : session.Close;
+            var price = close == session.Close ? 120m : 90m;
+            bars.Add(new(daily.Bars[0].Instrument, open, close, price, price, price, price, 10000,
+                open == session.Open, close == session.Close));
+        }
+    var result = new BacktestEngine().Run(compiled.Strategy, daily with { Interval = BarInterval.Hourly, Bars = bars }, Config() with { InitialCash = 2000 });
+    Equal(8, result.Fills.Count);
+    Equal(6m, result.Fills[0].Quantity);
+    Equal(120m, result.Fills[0].Price);
+    Equal(daily.Sessions[7].Close, result.Fills[0].Time);
+    Equal(daily.Sessions[6].Close, result.Orders.First().Time);
+    var dailyResult = new BacktestEngine().Run(compiled.Strategy, PaydayData(120m), Config() with { InitialCash = 2000 });
+    True(result.Fills.SequenceEqual(dailyResult.Fills));
+});
+
+Test("Instrument calendar handles offsets, holidays, month boundaries and absent coverage", () =>
+{
+    var data = PaydayData();
+    InstrumentContext? market = null;
+    Run(new CallbackStrategy(onStart: c =>
+    {
+        market = new(c, "a", data.Bars[0].Instrument);
+        True(market.TradingDay() is null);
+        True(market.Close is null);
+        True(market.BuyNotional(810) is null);
+    }, onBar: (c, bars) =>
+    {
+        var index = data.Sessions.FindIndex(s => s.Close == c.Time);
+        var current = market!.TradingDay()!;
+        Equal(data.Sessions[index], current.Session);
+        Equal(100m, market.Close!.Value);
+        if (index == 0) True(market.TradingDay(-1) is null);
+        else Equal(data.Sessions[index - 1], market.TradingDay(-1)!.Session);
+        if (index == data.Sessions.Count - 1) True(market.TradingDay(1) is null);
+        else Equal(data.Sessions[index + 1], market.TradingDay(1)!.Session);
+        if (current.Date == new DateOnly(2024, 11, 27))
+            Equal(new DateOnly(2024, 11, 29), market.TradingDay(1)!.Date);
+        if (current.Date == new DateOnly(2024, 11, 29))
+        {
+            True(current.IsMonthEnd);
+            Equal(20, current.DaysInMonth);
+            Equal(1, market.TradingDay(1)!.DayOfMonth);
+            Equal(new DateOnly(2024, 12, 2), market.TradingDay(1)!.Date);
+        }
+        True(market.TradingDay(int.MaxValue) is null);
+    }), data);
+    Throws<InvalidOperationException>(() => Run(new CallbackStrategy(onBar: (c, _) => new InstrumentContext(c, "a", instrument).TradingDay())));
+});
+Test("Bound order helpers round lots and preserve direct quantities and limits", () =>
+{
+    var result = Run(new CallbackStrategy(onBar: (c, _) =>
+    {
+        if (c.History(instrument, 2).Count != 1) return;
+        var market = new InstrumentContext(c, "a", instrument);
+        Equal(8m, market.LotsForNotional(810));
+        Equal(8.1m, market.LotsForNotional(810, 0.1m));
+        True(market.BuyNotional(99) is null);
+        Throws<ArgumentOutOfRangeException>(() => market.LotsForNotional(0));
+        Throws<ArgumentOutOfRangeException>(() => market.LotsForNotional(100, 0));
+        Throws<ArgumentOutOfRangeException>(() => market.Buy(-1));
+        Throws<ArgumentOutOfRangeException>(() => market.Sell(0));
+        market.Buy(2, OrderType.Limit, TimeInForce.Day, 110);
+        market.SellNotional(100);
+    }));
+    Equal(1m, result.Final.Positions.Single().Quantity);
+    True(result.Fills.Any(f => f.Quantity == 2));
+    True(result.Fills.Any(f => f.Quantity == -1));
+});
+Test("ExitLong cancels only its account and instrument and repeated calls cannot oversell", () =>
+{
+    var other = instrument with { Symbol = "ETH" };
+    var data = Data(100, 100, 100);
+    data = data with { Bars = data.Bars.Concat(data.Bars.Select(b => b with { Instrument = other })).OrderBy(b => b.OpenTime).ToList() };
+    var result = Run(new CallbackStrategy(weight: 0.5m, onStart: c =>
+    {
+        c.Register("b", 0.5m);
+        c.Buy("a", instrument, 3);
+        c.Buy("b", instrument, 2);
+    }, onBar: (c, _) =>
+    {
+        if (c.History(instrument, 2).Count != 1) return;
+        c.Buy("a", instrument, 1);
+        var otherAccount = c.Buy("b", instrument, 1);
+        var otherInstrument = c.Buy("a", other, 1);
+        var market = new InstrumentContext(c, "a", instrument);
+        market.ExitLong();
+        market.ExitLong();
+        Equal(1, c.OpenOrders.Count(o => o.Request.Substrategy == "a" && o.Request.Instrument == instrument));
+        True(c.OpenOrders.Any(o => o.OrderId == otherAccount));
+        True(c.OpenOrders.Any(o => o.OrderId == otherInstrument));
+    }), data);
+    Equal(0m, result.Final.Positions.Single(p => p.Substrategy == "a" && p.Instrument == instrument).Quantity);
+    Equal(3m, result.Final.Positions.Single(p => p.Substrategy == "b").Quantity);
+    Equal(1m, result.Final.Positions.Single(p => p.Instrument == other).Quantity);
+    Equal(-3m, result.Fills.Where(f => f.Quantity < 0).Sum(f => f.Quantity));
+});
+Test("ExitShort covers actual shorts and ExitLong never adds to them", () =>
+{
+    var result = Run(new CallbackStrategy(onStart: c => new InstrumentContext(c, "a", instrument).Sell(2), onBar: (c, _) =>
+    {
+        if (c.History(instrument, 2).Count != 1) return;
+        var market = new InstrumentContext(c, "a", instrument);
+        True(market.ExitLong() is null);
+        market.ExitShort();
+        market.ExitShort();
+    }));
+    Equal(2, result.Fills.Count);
+    Equal(0m, result.Final.Positions.Single().Quantity);
+});
+
 var failures = 0;
 foreach (var (name, test) in tests)
 {

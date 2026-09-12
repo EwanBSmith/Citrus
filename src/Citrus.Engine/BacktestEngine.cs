@@ -30,14 +30,9 @@ public sealed class BacktestEngine
         foreach (var group in data.Bars.GroupBy(b => b.Instrument))
             DatasetValidator.RequireCoverage(data, group.Key, group.Min(b => b.OpenTime), group.Max(b => b.CloseTime));
         var available = data.Bars.Select(b => b.Instrument).ToHashSet();
-        var permitted = configuration.TradableUniverse;
-        if (permitted is not null && (permitted.Distinct().Count() != permitted.Count ||
-            permitted.Any(i => i is null || !available.Contains(i))))
-            throw new ArgumentException("Tradable universe must contain distinct instruments present in the market dataset.");
-        var universe = permitted is null ? available : permitted.ToHashSet();
         var ledger = new Ledger(configuration.InitialCash);
         var book = new OrderBook(ledger, configuration.Simulation, configuration.Seed);
-        var context = new Context(ledger, book, mode, universe);
+        var context = new Context(ledger, book, mode, available, data.Sessions);
         var opens = data.Bars.GroupBy(b => b.OpenTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var closes = data.Bars.GroupBy(b => b.CloseTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var actions = data.CorporateActions.GroupBy(a => a.Time).ToDictionary(g => g.Key, g => g.OrderBy(a => a.Id, StringComparer.Ordinal).ToArray());
@@ -113,7 +108,7 @@ public sealed class BacktestEngine
     }
 
     /// <summary>Implements strategy operations against the ledger and order book while retaining completed history.</summary>
-    private sealed class Context(Ledger ledger, OrderBook book, ExecutionMode mode, HashSet<Instrument> universe) : IStrategyContext
+    private sealed class Context(Ledger ledger, OrderBook book, ExecutionMode mode, HashSet<Instrument> available, IReadOnlyList<MarketSession> sessions) : IStrategyContext
     {
         private readonly Dictionary<Instrument, List<Bar>> history = [];
         public readonly SortedDictionary<DateTimeOffset, List<string>> Scheduled = [];
@@ -121,6 +116,7 @@ public sealed class BacktestEngine
         public bool Started;
         public bool Stopping;
         public ExecutionMode Mode => mode;
+        public IReadOnlyList<MarketSession> Sessions { get; } = Array.AsReadOnly(sessions.ToArray());
         public DateTimeOffset Time { get; set; }
         public PortfolioSnapshot Portfolio => ledger.Snapshot(Time);
         public IReadOnlyList<OrderUpdate> OpenOrders => book.Pending.Select(o => new OrderUpdate(o.Id,
@@ -148,8 +144,8 @@ public sealed class BacktestEngine
         public long Submit(OrderRequest order)
         {
             if (Stopping) throw new InvalidOperationException("Run is stopping.");
-            if (!universe.Contains(order.Instrument))
-                throw new ArgumentException($"Instrument {order.Instrument.Key} is outside the tradable universe.");
+            if (!available.Contains(order.Instrument))
+                throw new ArgumentException($"Instrument {order.Instrument.Key} has no bars in the market dataset.");
             return book.Submit(order, Time);
         }
         /// <summary>Cancels a pending order at the current simulation time and reports whether it was found.</summary>

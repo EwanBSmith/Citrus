@@ -11,7 +11,7 @@ The source requirements remain unchanged. This table maps first-release requirem
 | UR-DATA-003 | Versioned coverage cache with atomic file replacement | Missing-range and cache reuse tests |
 | UR-DATA-004 | Explicit split/dividend/merger/symbol-change/delisting events | Corporate-action tests, successor aggregation and unresolved-event rejection |
 | UR-DATA-005–007 | Seeded geometric Brownian OHLC generator; extensible interval record | Deterministic generation and OHLC validation tests |
-| UR-DATA-008–010 | Dataset-based runs with optional configured tradable universe; separate cached data downloads | Universe validation, permitted/forbidden orders, signal history, empty/default settings and cache reuse tests |
+| UR-DATA-008–010 | Dataset-based runs with strategy-selected instruments; separate cached data downloads | Multi-instrument orders and history, missing instrument data rejection, and cache reuse tests |
 | UR-BT-001–003, 005/006; UR-STRAT-006/007 | Registered substrategies, full instrument identity, compatible netting, virtual ledgers and exports | Crossing, residual rejection, attribution, reconciliation and exports tests |
 | UR-EQ-001–005 | Market, limit, opening, closing, and equity shorts | Timing, gap fills, session/DST/holiday, limit, short-availability tests |
 | UR-STRAT-001–003/005 | C# API, rebalance helper, per-run external-data cache, SMA/EMA | Pending-aware rebalance, external-data cache and indicator tests |

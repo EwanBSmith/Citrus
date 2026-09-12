@@ -26,7 +26,7 @@ dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
 
 Choose **New example** to create a self-contained offline workspace in a new child folder, or **Open** an existing run JSON. Edit C# on the Strategy tab and the complete run JSON on Configuration. **Save all** (`Ctrl+S`) saves both documents; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports the same reports as the CLI. You can also pass a run JSON path as the application's first argument. Changes to the configured strategy path take effect on validation or execution, which loads that source into the editor after saving the previously displayed source to its original path.
 
-Configuration paths resolve relative to the run JSON. Set the tradable universe in the configuration editor; leave it blank to allow all dataset instruments.
+Configuration paths resolve relative to the run JSON. Strategies select the instruments they trade; supply their market data in the configured dataset.
 
 Overview reports portfolio performance and equity. Result tabs expose orders, fills, positions, costs, equity (including substrategy balances), and instrument attribution; click a column to sort or use `Ctrl+C` to copy selected rows. Tables show the first 5,000 records; **Results folder** opens the complete JSON/CSV exports. Runs replace matching report files. Prior results are cleared when a new run starts so a failed run cannot appear successful.
 
@@ -54,19 +54,39 @@ Rerunning a backtest overwrites its result files in the configured output direct
 
 The perpetual example has a trend substrategy and a holding substrategy with 70/30 capital allocation. The equity example demonstrates next-session opening orders across a weekend and the US daylight-saving transition. Generated prices have zero funding and no corporate actions unless supplementary events are added.
 
-## Tradable universe
+## Payday seasonality
 
-Backtests use the `data` MarketDataset path. Prepare datasets using `data generate`, `data download`, or `data import`. The separate universe file and `--universe` argument have been removed.
+`examples/PaydaySeasonality.cs` ports the supplied Zorro `PaydaySeason` rules: buy SCHB on trading sessions 8 and 16, sell its entire long holding on session 12 and the last session of each month. Each entry buys `floor(810 / preceding session close)` whole shares; the $810 notional is fixed, not compounded. Edit the strategy constructor or `BuyNotional` amount to change the instrument or allocation. The run starts with $1,000 to leave a cash buffer for price movement and costs.
 
-Optionally restrict trading in the run JSON:
-
-```json
-"tradableUniverse": [
-  { "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "BTC" }
-]
+```sh
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data download examples/payday-download.json artifacts/payday-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/payday-run.json
 ```
 
-Omitting `tradableUniverse` (or setting it to `null`) permits all instruments present in the dataset. An empty array permits no trading. Explicit entries must be distinct and present in the dataset, using exact, case-sensitive identities. All dataset bars remain visible for signals and history, including instruments that cannot be traded. Orders outside the configured universe fail. The configuration, including this restriction, is retained in exported manifests.
+The download uses the existing Alpaca credentials described below and must finish before opening the run in the workbench. Alternatively import a normalized SCHB dataset at the same path. Supply **complete exchange-calendar months** in `sessions`: trading-day counts use that calendar, not observed bar counts or weekdays. Missing calendar sessions silently change the strategy dates; the strategy cannot establish calendar completeness itself. The example requests daily bars for November and December 2024. A partial bar range can use a full-month calendar, but must not truncate that calendar. Only one shared exchange calendar is currently supported by the framework.
+
+The strategy runs once at each session close and inspects `market.TradingDay(1)`, the next exchange session. Signals on days 7, 11, 15 and the penultimate session submit day-only market-on-close orders for days 8, 12, 16 and month end. The engine has already processed the signal day's auction and expiry before `OnBar`, so these orders remain eligible for the following auction, including early closes. Daily data is sufficient: dates match the intended Zorro windows, but sizing uses the preceding close instead of the original 15:30 price. Hourly datasets still work and use only their final daily bars. No 90-bar warmup is needed. Start before a required signal day; starting on an entry date does not retroactively submit its order. Entries without an affordable share are skipped; rejected entries cannot create a short exit. Rejected orders are not retried. A run ending before an exit date leaves the position open.
+
+## Concise strategy API
+
+Derive from `InstrumentStrategy` for one account/instrument. Its constructor registers capital and the host forwards only that instrument's bars to `OnBar(InstrumentContext market, Bar bar)`. For several instruments or substrategies, use `IStrategy` and construct an `InstrumentContext` for each registered account/instrument during startup.
+
+```csharp
+var next = market.TradingDay(1);
+if (next?.DayOfMonth is 8 or 16)
+    market.BuyNotional(810m, OrderType.MarketOnClose, TimeInForce.Day);
+```
+
+`TradingDay()` returns the latest opened session; positive offsets advance sessions, negative offsets go backwards. Its `Date`, `DayOfMonth`, `DaysInMonth`, and `IsMonthEnd` use the exchange calendar (New York by default; a custom zone can be passed to `InstrumentContext`). It returns null outside calendar coverage or before the first session opens, and throws if no calendar exists. Future session times are available, but future prices never are.
+
+`Buy(quantity)` and `Sell(quantity)` remain direct additional-unit orders. Both accept execution type, time-in-force, and an optional limit price. `BuyNotional` and `SellNotional` size additional orders from completed prices; `LotsForNotional` exposes the calculation and accepts a lot size (default one, or e.g. `0.001m` for fractional units). Missing history or an unaffordable lot produces no notional order. `Quantity` reads actual holdings and `Close` reads the latest completed price.
+
+`ExitLong` and `ExitShort` cancel pending orders for that account/instrument and close only its actual holding on the requested side; calling them while flat cannot open an opposite position. Repeated exits replace the pending exit, rather than duplicating its quantity. `CancelOrders` is also available explicitly. Orders use the existing execution, margin, costs, rejection, and attribution rules. For scheduling, portfolio access, or advanced orders, use `market.Context`; the original `IStrategy` API remains available.
+
+## Market datasets
+
+Backtests use the `data` MarketDataset path. Prepare datasets using `data generate`, `data download`, or `data import`. Strategies can observe and trade any instrument present in that dataset, using exact, case-sensitive instrument identities. Orders for instruments without market bars fail with a missing-data error. Selecting an instrument in strategy code does not download its data.
+
 ## Strategies
 
 A source file defines exactly one concrete `IStrategy` with a public parameterless constructor. Specify extra assembly paths in the run configuration's `references` array, or after the source filename with `validate`.

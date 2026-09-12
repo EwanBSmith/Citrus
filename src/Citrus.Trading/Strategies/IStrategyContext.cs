@@ -11,6 +11,8 @@ public interface IStrategyContext
     PortfolioSnapshot Portfolio { get; }
     /// <summary>Gets pending orders with request quantities set to their signed unfilled balances.</summary>
     IReadOnlyList<OrderUpdate> OpenOrders { get; }
+    /// <summary>Gets the dataset's exchange session calendar, including future session times but no future prices. Supply complete months for monthly seasonality.</summary>
+    IReadOnlyList<MarketSession> Sessions => Array.Empty<MarketSession>();
     /// <summary>Allocates a positive fraction of initial capital during startup; names must be unique and total weights at most one.</summary>
     void Register(string substrategy, decimal capitalWeight);
     /// <summary>Returns up to count completed bars in chronological order as a copy; count must be nonnegative.</summary>

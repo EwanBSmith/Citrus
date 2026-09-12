@@ -76,7 +76,7 @@ internal sealed class MainForm : Form
         strategyPage = AddPage("Strategy", strategyEditor);
         strategyPage.Controls.Add(Hint("C# source • Trusted local code • Save all before validation or execution."));
         configPage = AddPage("Configuration", configEditor);
-        configPage.Controls.Add(Hint("Paths are relative to the run file. Rates and margins use fractions: 0.05 = 5%. Tradable universe accepts a JSON instrument array; blank allows all dataset instruments."));
+        configPage.Controls.Add(Hint("Paths are relative to the run file. Rates and margins use fractions: 0.05 = 5%."));
         var overview = AddPage("Overview", chart);
         overview.Controls.Add(metrics);
         foreach (var name in new[] { "Orders", "Fills", "Positions", "Costs", "Equity", "Attribution" })

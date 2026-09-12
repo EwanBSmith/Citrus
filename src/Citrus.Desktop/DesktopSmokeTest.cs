@@ -42,17 +42,6 @@ internal static class DesktopSmokeTest
             var configEditor = controls.OfType<ConfigurationEditor>().Single();
             if (System.Text.Json.JsonSerializer.Serialize(configEditor.ReadConfiguration(), Json.Options) != System.Text.Json.JsonSerializer.Serialize(config, Json.Options))
                 throw new InvalidOperationException("Configuration controls changed untouched settings.");
-            var universeInput = controls.OfType<TextBox>().Single(e => e.AccessibleName == "Tradable universe (JSON; blank = all)");
-            universeInput.Text = "[]";
-            if (configEditor.ReadConfiguration().TradableUniverse is not { Count: 0 })
-                throw new InvalidOperationException("Empty tradable universe was not preserved.");
-            var instruments = Json.Read<MarketDataset>(BacktestWorkspace.Resolve(path, config.Data)).Bars.Select(b => b.Instrument).Distinct().ToList();
-            universeInput.Text = System.Text.Json.JsonSerializer.Serialize(instruments, Json.Options);
-            if (!configEditor.ReadConfiguration().TradableUniverse!.SequenceEqual(instruments))
-                throw new InvalidOperationException("Configured tradable universe was not preserved.");
-            universeInput.Clear();
-            if (configEditor.ReadConfiguration().TradableUniverse is not null)
-                throw new InvalidOperationException("Blank tradable universe did not restore the default.");
             controls.OfType<NumericUpDown>().Single(e => e.AccessibleName == "Initial Cash").Value = 125000;
             var spread = controls.OfType<NumericUpDown>().Single(e => e.AccessibleName == "Spread (basis points)");
             spread.Value = 2;

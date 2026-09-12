@@ -1,5 +1,4 @@
 using Citrus.Simulation;
-using Citrus.Trading;
 
 namespace Citrus.Engine;
 
@@ -14,8 +13,6 @@ public sealed record RunConfiguration
     public string[] References { get; init; } = [];
     /// <summary>Gets the market dataset path, resolved relative to the run configuration by the CLI.</summary>
     public string Data { get; init; } = "";
-    /// <summary>Gets the permitted instruments; null allows all dataset instruments, while an empty list permits no trading.</summary>
-    public List<Instrument>? TradableUniverse { get; init; }
     /// <summary>Gets the results directory, resolved relative to the run configuration by the CLI.</summary>
     public string Output { get; init; } = "results";
     /// <summary>Gets starting portfolio cash, including capital not allocated to a substrategy.</summary>

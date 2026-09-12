@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "strategy": "PerpetualTrend.cs",
   "data": "../artifacts/perpetual-data.json",
-  "tradableUniverse": [{ "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "BTC" }],
   "output": "../artifacts/perpetual-result",
   "initialCash": 100000,
   "seed": 42,

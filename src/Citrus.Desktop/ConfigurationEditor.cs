@@ -28,7 +28,6 @@ internal sealed class ConfigurationEditor : UserControl
         Controls.Add(layout);
         AddGroup(layout, "Files and output", typeof(RunConfiguration), "Strategy", "Data", "Output", "References");
         AddGroup(layout, "Capital and reproducibility", typeof(RunConfiguration), "InitialCash", "Seed", "RiskFreeRate");
-        AddGroup(layout, "Trading", typeof(RunConfiguration), "TradableUniverse");
         AddGroup(layout, "Execution costs and borrowing", typeof(SimulationOptions), "CommissionFixed", "CommissionPerUnit", "SpreadBps", "SlippageBps", "RejectionProbability", "AnnualBorrowRate", "ShortsAvailable");
         AddGroup(layout, "Margin requirements", typeof(SimulationOptions), "EquityInitialMargin", "EquityMaintenanceMargin", "PerpetualInitialMargin", "PerpetualMaintenanceMargin");
         LoadConfiguration(new());
@@ -110,7 +109,7 @@ internal sealed class ConfigurationEditor : UserControl
             number.ValueChanged += Edited;
             return number;
         }
-        var text = new TextBox { Multiline = (type == typeof(string[]) || type == typeof(List<Instrument>)), Height = (type == typeof(string[]) || type == typeof(List<Instrument>)) ? 65 : 25, ScrollBars = (type == typeof(string[]) || type == typeof(List<Instrument>)) ? ScrollBars.Vertical : ScrollBars.None };
+        var text = new TextBox { Multiline = type == typeof(string[]), Height = type == typeof(string[]) ? 65 : 25, ScrollBars = type == typeof(string[]) ? ScrollBars.Vertical : ScrollBars.None };
         text.TextChanged += Edited;
         return text;
     }
@@ -144,7 +143,7 @@ internal sealed class ConfigurationEditor : UserControl
                         if (value is DateTimeOffset timestamp) date.Value = timestamp.UtcDateTime;
                         date.Checked = value is not null;
                         break;
-                    case TextBox text: text.Text = value is List<Instrument> instruments ? JsonSerializer.Serialize(instruments, Citrus.Data.Json.Options) : value is string[] paths ? string.Join(Environment.NewLine, paths) : (string?)value ?? ""; break;
+                    case TextBox text: text.Text = value is string[] paths ? string.Join(Environment.NewLine, paths) : (string?)value ?? ""; break;
                 }
             }
             changed.Clear();
@@ -167,8 +166,6 @@ internal sealed class ConfigurationEditor : UserControl
                 ComboBox combo => combo.SelectedItem,
                 DateTimePicker date => date.Checked ? new DateTimeOffset(DateTime.SpecifyKind(date.Value, DateTimeKind.Utc)) : null,
                 TextBox text when key == "References" => text.Lines.Where(line => !string.IsNullOrWhiteSpace(line)).Select(line => line.Trim()).ToArray(),
-                TextBox text when key == "TradableUniverse" => string.IsNullOrWhiteSpace(text.Text) ? null :
-                    JsonSerializer.Deserialize<List<Instrument>>(text.Text, Citrus.Data.Json.Options),
                 TextBox text => text.Text,
                 _ => throw new InvalidOperationException("Unsupported setting: " + key)
             };
@@ -202,7 +199,6 @@ internal sealed class ConfigurationEditor : UserControl
     /// <summary>Supplies readable labels with explicit units for rates, prices, and optional fields.</summary>
     private static string Label(string name) => name switch
     {
-        "TradableUniverse" => "Tradable universe (JSON; blank = all)",
         "References" => "Assembly references (one per line)",
         "Start" => "Start (check to enable)", "End" => "End (exclusive; optional)",
         "SpreadBps" => "Spread (basis points)", "SlippageBps" => "Slippage (basis points)",

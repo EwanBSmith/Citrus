@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "strategy": "PaydaySeasonality.cs",
+  "data": "../artifacts/payday-data.json",
+  "output": "../artifacts/payday-result",
+  "initialCash": 1000,
+  "seed": 42,
+  "simulation": {
+    "commissionFixed": 0,
+    "spreadBps": 2,
+    "slippageBps": 1,
+    "rejectionProbability": 0,
+    "annualBorrowRate": 0,
+    "shortsAvailable": false
+  }
+}

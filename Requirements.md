@@ -76,7 +76,7 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-DATA-005** Citrus shall provide a geometric or arithmetic Brownian-motion data generator, as selected in the detailed design, for simulated prices.
 - **UR-DATA-006** Citrus shall initially support daily and hourly data intervals.
 - **UR-DATA-007** The market-data architecture shall permit additional data intervals to be added later.
-- **UR-DATA-008** Backtests shall read a MarketDataset and accept an optional tradableUniverse instrument list in the run configuration. Omitted or null permits all dataset instruments; an empty list permits no trades. Explicit entries must be distinct and present in the dataset. Strategies retain access to all dataset history but cannot place orders outside the tradable universe.
+- **UR-DATA-008** Backtests shall read a MarketDataset. Strategies shall select the instruments they trade and may access history and place orders for any instrument present in the dataset. Orders for instruments without market bars shall fail with a missing-data error.
 - **UR-DATA-009** Data download commands shall cache historical coverage from Alpaca for equities or Hyperliquid for perpetuals for reuse. Unavailable coverage shall fail rather than shorten it silently.
 - **UR-DATA-010** Backtests using prepared market datasets shall run without provider network access.
 
