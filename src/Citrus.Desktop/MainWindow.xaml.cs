@@ -5,23 +5,10 @@ using Citrus.Engine;
 
 namespace Citrus.Desktop;
 
-/// <summary>Provides a classic Windows workbench for editing, running, and inspecting backtests.</summary>
-internal sealed class MainForm : Form
+/// <summary>Coordinates XAML workspace views, saved documents, and background backtests.</summary>
+public partial class MainWindow : Window
 {
-    private readonly MenuStrip menu = new() { RenderMode = ToolStripRenderMode.System };
-    private readonly ToolStrip toolbar = new() { RenderMode = ToolStripRenderMode.System, GripStyle = ToolStripGripStyle.Hidden };
-    private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
-    private readonly TreeView navigation = new() { Dock = DockStyle.Fill, HideSelection = false };
-    private readonly StrategyEditor strategyEditor = new();
-    private readonly ConfigurationEditor configEditor = new();
-    private readonly TextBox log = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false };
-    private readonly ToolStripStatusLabel status = new("Ready — open a strategy folder or create an example") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-    private readonly ToolStripProgressBar progress = new() { Visible = false, Style = ProgressBarStyle.Marquee };
-    private readonly EquityChart chart = new();
-    private readonly Label metrics = new() { Dock = DockStyle.Top, Height = 65, Padding = new Padding(12), Text = "No completed backtest", BackColor = SystemColors.ControlLightLight };
-    private readonly TabPage strategyPage;
-    private readonly TabPage configPage;
-    private readonly Dictionary<string, DataGridView> grids = [];
+    private readonly Dictionary<string, DataGrid> grids;
     private readonly string? historicalDataDirectory;
     private string? configPath;
     private string? strategyPath;
@@ -30,114 +17,84 @@ internal sealed class MainForm : Form
     private bool configDirty;
     private bool loading;
     private bool busy;
-    private readonly ToolStripComboBox backtests = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, AccessibleName = "Backtest configuration" };
 
-    /// <summary>Builds the native menu, toolbar, split workspace, results tabs, and status area.</summary>
-    internal MainForm(string? initialPath = null, string? historicalDataDirectory = null)
+    /// <summary>Creates an empty workbench without accessing user files in the designer.</summary>
+    public MainWindow() : this(null, null) { }
+
+    /// <summary>Creates the workspace and defers opening an optional strategy until the window is loaded.</summary>
+    internal MainWindow(string? initialPath, string? historicalDataDirectory)
     {
+        InitializeComponent();
         this.historicalDataDirectory = historicalDataDirectory;
-        Text = "Citrus — Backtesting Workbench";
-        Font = new Font("Segoe UI", 9F);
-        Size = new Size(1280, 850);
-        MinimumSize = new Size(900, 620);
-        StartPosition = FormStartPosition.CenterScreen;
-        AutoScaleMode = AutoScaleMode.Dpi;
-        Icon = SystemIcons.Application;
-        var file = new ToolStripMenuItem("&File");
-        file.DropDownItems.Add(Command("&Open strategy...", Keys.Control | Keys.O, Open));
-        file.DropDownItems.Add(Command("Create &example...", Keys.None, CreateExample));
-        file.DropDownItems.Add(Command("&Save all", Keys.Control | Keys.S, SaveAll));
-        file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(Command("E&xit", Keys.Alt | Keys.F4, Close));
-        var run = new ToolStripMenuItem("&Backtest");
-        run.DropDownItems.Add(Command("&Validate strategy", Keys.F6, () => _ = ValidateAsync()));
-        run.DropDownItems.Add(Command("&Run backtest", Keys.F5, () => _ = RunAsync()));
-        run.DropDownItems.Add(Command("Open results &folder", Keys.None, OpenResults));
-        var help = new ToolStripMenuItem("&Help");
-        help.DropDownItems.Add(Command("&About Citrus", Keys.None, () => MessageBox.Show(this,
-            "Citrus Backtesting Workbench\nWindows Forms • .NET 10\n\nEdit trusted C# strategies and run deterministic backtests.\nStrategies execute with your normal process permissions.\nAll result timestamps are UTC.", "About Citrus", MessageBoxButtons.OK, MessageBoxIcon.Information)));
-        var settings = new ToolStripMenuItem("&Settings");
-        settings.DropDownItems.Add(Command("&Global settings...", Keys.None, () =>
-        {
-            using var dialog = new GlobalSettingsForm();
-            dialog.ShowDialog(this);
-        }));
-        var data = new ToolStripMenuItem("&Data");
-        data.DropDownItems.Add(Command("&Historical data...", Keys.None, OpenHistoricalData));
-        menu.Items.AddRange([file, run, data, settings, help]);
-        MainMenuStrip = menu;
-        AddButton("Open...", Open);
-        AddButton("New example...", CreateExample);
-        AddButton("Save all", SaveAll);
-        toolbar.Items.Add(new ToolStripSeparator());
-        AddButton("Validate (F6)", () => _ = ValidateAsync());
-        AddButton("Run backtest (F5)", () => _ = RunAsync());
-        toolbar.Items.Add(new ToolStripSeparator());
-        AddButton("Results folder", OpenResults);
-        AddButton("Historical data...", OpenHistoricalData);
-        toolbar.Items.Add(new ToolStripLabel("Backtest:"));
-        toolbar.Items.Add(backtests);
-        AddButton("Copy backtest...", CopyBacktest);
-        backtests.SelectedIndexChanged += (_, _) =>
-        {
-            if (loading || configPath is null || backtests.SelectedItem is not string name) return;
-            Guard(() =>
-            {
-                try { LoadConfiguration(StrategyFolder.ConfigurationPath(StrategyFolder.Root(configPath)!, name)); }
-                finally { RefreshBacktests(); }
-            });
-        };
-
-        var workspace = new SplitContainer { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel1, Size = new Size(1200, 700), SplitterDistance = 210, Panel1MinSize = 160 };
-        workspace.Panel1.Controls.Add(navigation);
-        workspace.Panel1.Controls.Add(new Label { Text = "  WORKSPACE", Dock = DockStyle.Top, Height = 29, TextAlign = ContentAlignment.MiddleLeft, BackColor = SystemColors.ControlLight });
-        var right = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.Panel2, Size = new Size(950, 700), SplitterDistance = 555, Panel2MinSize = 85 };
-        right.Panel1.Controls.Add(tabs);
-        right.Panel2.Controls.Add(log);
-        right.Panel2.Controls.Add(new Label { Text = "  Execution log", Dock = DockStyle.Top, Height = 24, TextAlign = ContentAlignment.MiddleLeft });
-        workspace.Panel2.Controls.Add(right);
-
-        strategyPage = AddPage("Strategy", strategyEditor);
-        strategyPage.Controls.Add(Hint("C# strategy • Ctrl+Space: complete • Ctrl+Shift+Space: parameters • F6: validate • F5: run"));
-        configPage = AddPage("Configuration", configEditor);
-        configPage.Controls.Add(Hint("Folder backtest paths are relative to the strategy folder. Rates and margins use fractions: 0.05 = 5%."));
-        var overview = AddPage("Overview", chart);
-        overview.Controls.Add(metrics);
-        foreach (var name in new[] { "Orders", "Fills", "Positions", "Costs", "Equity", "Attribution" })
-        {
-            var grid = new DataGridView
-            {
-                Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells, BackgroundColor = SystemColors.Window,
-                BorderStyle = BorderStyle.Fixed3D, RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                AllowUserToOrderColumns = true, ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableAlwaysIncludeHeaderText,
-                AccessibleName = name + " results", AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(242, 245, 248) }
-            };
-            grids.Add(name, grid);
-            AddPage(name, grid).Controls.Add(Hint("Completed run • UTC timestamps • Click column headers to sort; Ctrl+C to copy. First 5,000 rows shown; full data is exported."));
-        }
-        var root = navigation.Nodes.Add("Backtest workspace");
-        foreach (TabPage page in tabs.TabPages) root.Nodes.Add(new TreeNode(page.Text) { Tag = page });
-        root.Expand();
-        navigation.AfterSelect += (_, e) => { if (e.Node?.Tag is TabPage page) tabs.SelectedTab = page; };
-        var statusBar = new StatusStrip { RenderMode = ToolStripRenderMode.System };
-        statusBar.Items.AddRange([status, progress]);
-        Controls.Add(workspace); Controls.Add(toolbar); Controls.Add(menu); Controls.Add(statusBar);
+        grids = new() { ["Orders"] = orders, ["Fills"] = fills, ["Positions"] = positions,
+            ["Costs"] = costs, ["Equity"] = equity, ["Attribution"] = attribution };
+        foreach (var grid in grids.Values) grid.AutoGeneratingColumn += BindResultColumn;
         strategyEditor.SourceChanged += (_, _) => { if (!loading) strategyDirty = true; UpdateTitle(); };
         configEditor.ConfigurationChanged += (_, _) =>
         {
             if (!loading) { configDirty = true; RefreshEditorReferences(); }
             UpdateTitle();
         };
-        FormClosing += OnClosing;
-        if (initialPath is not null) Shown += (_, _) => Guard(() => LoadConfiguration(initialPath));
+        Closing += OnClosing;
+        Closed += (_, _) => { strategyEditor.Dispose(); chart.Dispose(); ClearTables(); };
+        if (initialPath is not null) Loaded += (_, _) => Guard(() => LoadConfiguration(initialPath));
     }
 
-    /// <summary>Opens the historical download and local dataset management dialog.</summary>
-    private void OpenHistoricalData()
+    /// <summary>Releases table storage after a completed run is replaced or the window closes.</summary>
+    private void ClearTables()
     {
-        using var dialog = new HistoricalDataForm(historicalDataDirectory);
-        dialog.ShowDialog(this);
+        foreach (var grid in grids.Values)
+        {
+            var table = (grid.ItemsSource as DataView)?.Table;
+            grid.ItemsSource = null;
+            table?.Dispose();
+        }
+    }
+
+    /// <summary>Binds literal flattened column names without interpreting periods as nested WPF paths.</summary>
+    private void BindResultColumn(object? sender, DataGridAutoGeneratingColumnEventArgs e)
+    {
+        if (e.Column is DataGridBoundColumn column)
+            column.Binding = new System.Windows.Data.Binding { Path = new PropertyPath("(0)", e.PropertyDescriptor) };
+    }
+
+    /// <summary>Prevents conflicting menu and keyboard commands during execution.</summary>
+    private void CanExecuteCommand(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = !busy;
+
+    /// <summary>Routes menu and keyboard commands through the UI error boundary.</summary>
+    private void ExecuteCommand(object sender, ExecutedRoutedEventArgs e) => Guard(() =>
+    {
+        switch (e.Parameter as string)
+        {
+            case "Open": Open(); break;
+            case "Example": CreateExample(); break;
+            case "Save": SaveAll(); break;
+            case "Validate": _ = ValidateAsync(); break;
+            case "Run": _ = RunAsync(); break;
+            case "Results": OpenResults(); break;
+            case "Copy": CopyBacktest(); break;
+            case "History": new HistoricalDataWindow(historicalDataDirectory) { Owner = this }.ShowDialog(); break;
+            case "Settings": new GlobalSettingsWindow { Owner = this }.ShowDialog(); break;
+            case "Exit": Close(); break;
+            case "About": MessageBox.Show(this, "Citrus Backtesting Workbench\nWPF • AvalonEdit • .NET 10\n\nEdit trusted C# strategies and run deterministic backtests.\nAll result timestamps are UTC.", "About Citrus"); break;
+        }
+    });
+
+    /// <summary>Loads a selected named backtest and restores the selection when navigation is cancelled.</summary>
+    private void BacktestChanged(object sender, RoutedEventArgs e)
+    {
+        if (loading || configPath is null || sender is not MenuItem { Tag: string name }) return;
+        Guard(() =>
+        {
+            try { LoadConfiguration(StrategyFolder.ConfigurationPath(StrategyFolder.Root(configPath)!, name)); }
+            finally { RefreshBacktests(); }
+        });
+    }
+
+    /// <summary>Selects the tab represented by a workspace navigation item.</summary>
+    private void NavigateWorkspace(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is TreeViewItem { Tag: string index }) tabs.SelectedIndex = int.Parse(index);
     }
 
     /// <summary>Lists sibling backtests and restores the active selection without triggering navigation.</summary>
@@ -148,10 +105,21 @@ internal sealed class MainForm : Form
         {
             backtests.Items.Clear();
             var root = configPath is null ? null : StrategyFolder.Root(configPath);
-            backtests.Enabled = root is not null;
+            backtests.IsEnabled = root is not null;
             if (root is null) return;
-            backtests.Items.AddRange(StrategyFolder.Backtests(root).Select(p => (object)Path.GetFileNameWithoutExtension(p)).ToArray());
-            backtests.SelectedItem = Path.GetFileNameWithoutExtension(configPath);
+            foreach (var path in StrategyFolder.Backtests(root))
+            {
+                var name = Path.GetFileNameWithoutExtension(path);
+                var item = new MenuItem
+                {
+                    Header = new TextBlock { Text = name },
+                    Tag = name,
+                    IsCheckable = true,
+                    IsChecked = string.Equals(name, Path.GetFileNameWithoutExtension(configPath), StringComparison.OrdinalIgnoreCase)
+                };
+                item.Click += BacktestChanged;
+                backtests.Items.Add(item);
+            }
         }
         finally { loading = false; }
     }
@@ -161,38 +129,14 @@ internal sealed class MainForm : Form
     {
         if (configPath is null || StrategyFolder.Root(configPath) is not string root)
             throw new InvalidOperationException("Open a strategy folder first.");
-        using var dialog = new SaveFileDialog { Title = "Copy backtest", Filter = "Backtest (*.json)|*.json", InitialDirectory = Path.Combine(root, "Backtests"), FileName = "NewBacktest.json" };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        var dialog = new SaveFileDialog { Title = "Copy backtest", Filter = "Backtest (*.json)|*.json", InitialDirectory = Path.Combine(root, "Backtests"), FileName = "NewBacktest.json" };
+        if (dialog.ShowDialog(this) != true) return;
         if (!string.Equals(Path.GetDirectoryName(dialog.FileName), Path.Combine(root, "Backtests"), StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Save the backtest inside this strategy's Backtests folder.");
         SaveAll();
         var configuration = configEditor.ReadConfiguration() with { Strategy = null, Output = "Results/" + Path.GetFileNameWithoutExtension(dialog.FileName) };
         Citrus.Data.Json.Write(dialog.FileName, configuration);
         LoadConfiguration(dialog.FileName);
-    }
-
-    /// <summary>Creates the compact explanatory strip above an editor or result table.</summary>
-    private static Label Hint(string text) => new() { Text = text, Dock = DockStyle.Top, Height = 42, Padding = new Padding(8, 5, 8, 3) };
-
-    /// <summary>Adds a native tab page containing a fill-docked control.</summary>
-    private TabPage AddPage(string title, Control content)
-    {
-        var page = new TabPage(title) { Padding = new Padding(3) };
-        page.Controls.Add(content); tabs.TabPages.Add(page); return page;
-    }
-
-    /// <summary>Creates a menu command whose errors are shown in the log and a dialog.</summary>
-    private ToolStripMenuItem Command(string text, Keys shortcut, Action action)
-    {
-        var item = new ToolStripMenuItem(text) { ShortcutKeys = shortcut };
-        item.Click += (_, _) => Guard(action); return item;
-    }
-
-    /// <summary>Adds a textual toolbar button matching the classic enterprise menu commands.</summary>
-    private void AddButton(string text, Action action)
-    {
-        var button = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text };
-        button.Click += (_, _) => Guard(action); toolbar.Items.Add(button);
     }
 
     /// <summary>Contains synchronous command errors at the UI boundary.</summary>
@@ -205,21 +149,19 @@ internal sealed class MainForm : Form
     /// <summary>Prompts for an existing run configuration.</summary>
     private void Open()
     {
-        using var dialog = new FolderBrowserDialog { Description = "Open Citrus strategy folder", UseDescriptionForTitle = true };
-        if (dialog.ShowDialog(this) == DialogResult.OK) LoadConfiguration(dialog.SelectedPath);
+        var dialog = new OpenFolderDialog { Title = "Open Citrus strategy folder" };
+        if (dialog.ShowDialog(this) == true) LoadConfiguration(dialog.FolderName);
     }
 
     /// <summary>Loads both documents only after reads succeed and outstanding edits are resolved.</summary>
     internal void LoadConfiguration(string path)
     {
         var fullPath = StrategyFolder.ConfigurationPath(path);
-        var text = File.ReadAllText(fullPath);
         var configuration = StrategyFolder.Read(fullPath);
         var sourcePath = StrategyFolder.Source(fullPath, configuration);
         var source = File.ReadAllText(sourcePath);
         if (!ConfirmEdits()) return;
         // Re-read after saving in case the selected run is the currently edited document.
-        text = File.ReadAllText(fullPath);
         configuration = StrategyFolder.Read(fullPath);
         sourcePath = StrategyFolder.Source(fullPath, configuration);
         source = File.ReadAllText(sourcePath);
@@ -240,8 +182,8 @@ internal sealed class MainForm : Form
     /// <summary>Generates an isolated sample workspace and opens it for immediate offline execution.</summary>
     private void CreateExample()
     {
-        using var dialog = new FolderBrowserDialog { Description = "Choose a parent folder for a new self-contained Citrus example", UseDescriptionForTitle = true };
-        if (dialog.ShowDialog(this) == DialogResult.OK) LoadConfiguration(BacktestWorkspace.CreateExample(dialog.SelectedPath, historicalDataDirectory));
+        var dialog = new OpenFolderDialog { Title = "Choose a parent folder for a new self-contained Citrus example" };
+        if (dialog.ShowDialog(this) == true) LoadConfiguration(BacktestWorkspace.CreateExample(dialog.FolderName, historicalDataDirectory));
     }
 
     /// <summary>Saves valid configuration JSON and the source document currently shown in the editor.</summary>
@@ -258,9 +200,9 @@ internal sealed class MainForm : Form
     private bool ConfirmEdits()
     {
         if (!strategyDirty && !configDirty) return true;
-        var choice = MessageBox.Show(this, "Save changes to the strategy and run configuration?", "Unsaved changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-        if (choice == DialogResult.Cancel) return false;
-        if (choice == DialogResult.Yes) SaveAll();
+        var choice = MessageBox.Show(this, "Save changes to the strategy and run configuration?", "Unsaved changes", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (choice == MessageBoxResult.Cancel) return false;
+        if (choice == MessageBoxResult.Yes) SaveAll();
         return true;
     }
 
@@ -362,8 +304,8 @@ internal sealed class MainForm : Form
             table.Columns.Add(key, value?.GetType() ?? typeof(string));
         }
         foreach (var row in rows) table.Rows.Add(table.Columns.Cast<DataColumn>().Select(c => row.GetValueOrDefault(c.ColumnName, DBNull.Value)).ToArray());
-        var previous = grids[name].DataSource as DataTable;
-        grids[name].DataSource = table; previous?.Dispose();
+        var previous = (grids[name].ItemsSource as DataView)?.Table;
+        grids[name].ItemsSource = table.DefaultView; previous?.Dispose();
     }
 
     /// <summary>Expands objects such as instruments and substrategy dictionaries into named scalar columns.</summary>
@@ -387,7 +329,7 @@ internal sealed class MainForm : Form
     private void ClearResults()
     {
         outputPath = null; chart.SetPoints([]); metrics.Text = "No completed backtest";
-        foreach (var grid in grids.Values) { var old = grid.DataSource as DataTable; grid.DataSource = null; old?.Dispose(); }
+        ClearTables();
     }
 
     /// <summary>Opens the actual completed report directory in Windows Explorer.</summary>
@@ -400,24 +342,25 @@ internal sealed class MainForm : Form
     /// <summary>Prevents concurrent commands and source mutation while keeping results and logs responsive.</summary>
     private void SetBusy(bool value, string? message = null)
     {
-        busy = value; menu.Enabled = toolbar.Enabled = !value;
+        busy = value; menu.IsEnabled = !value;
         strategyEditor.SetReadOnly(value);
-        configPage.Enabled = !value;
-        progress.Visible = value;
+        configPage.IsEnabled = !value;
+        progress.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        CommandManager.InvalidateRequerySuggested();
         if (message is not null) { status.Text = message; AppendLog(message); }
     }
 
     /// <summary>Marks edited documents and identifies the current run and source in their tabs.</summary>
     private void UpdateTitle()
     {
-        strategyPage.Text = "Strategy" + (strategyDirty ? " *" : "");
-        strategyPage.ToolTipText = strategyPath;
-        configPage.Text = "Configuration" + (configDirty ? " *" : "");
-        Text = $"{(configPath is null ? "Citrus" : (StrategyFolder.Root(configPath) is string folder ? Path.GetFileName(folder) + " / " + Path.GetFileNameWithoutExtension(configPath) : Path.GetFileName(configPath)) + " — Citrus")} — Backtesting Workbench";
+        strategyPage.Header = "Strategy" + (strategyDirty ? " *" : "");
+        strategyPage.ToolTip = strategyPath;
+        configPage.Header = "Configuration" + (configDirty ? " *" : "");
+        Title = $"{(configPath is null ? "Citrus" : (StrategyFolder.Root(configPath) is string folder ? Path.GetFileName(folder) + " / " + Path.GetFileNameWithoutExtension(configPath) : Path.GetFileName(configPath)) + " — Citrus")} — Backtesting Workbench";
     }
 
     /// <summary>Appends a timestamped diagnostic line and scrolls it into view.</summary>
-    private void AppendLog(string message) { log.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}"); }
+    private void AppendLog(string message) { log.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}"); log.ScrollToEnd(); }
 
     /// <summary>Redacts configured credentials from arbitrary strategy errors before presenting them.</summary>
     private void ShowError(Exception exception)
@@ -428,7 +371,7 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Prevents closing mid-run and preserves unsaved source/configuration edits.</summary>
-    private void OnClosing(object? sender, FormClosingEventArgs e)
+    private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (busy) { e.Cancel = true; status.Text = "Wait for the current operation to finish before closing."; return; }
         try { e.Cancel = !ConfirmEdits(); } catch (Exception exception) { e.Cancel = true; ShowError(exception); }

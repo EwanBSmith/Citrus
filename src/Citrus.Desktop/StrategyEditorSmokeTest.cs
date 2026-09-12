@@ -1,22 +1,19 @@
-using System.Runtime.InteropServices;
+using System.Windows.Threading;
 using Citrus.Engine;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
-using ScintillaNET;
+using static Citrus.Desktop.DesktopSmokeTest;
 
 namespace Citrus.Desktop;
 
-/// <summary>Exercises real Roslyn providers and native editor operations in the offline Windows smoke run.</summary>
+/// <summary>Exercises real Roslyn providers and AvalonEdit operations in the offline WPF smoke run.</summary>
 internal static class StrategyEditorSmokeTest
 {
     private const string ValidSource = "using System;\nusing Citrus.Trading;\npublic sealed class TestStrategy : InstrumentStrategy\n{\n    public TestStrategy() : base(new Instrument(\"test\", AssetClass.LinearPerpetual, \"BTC\"), \"test\", 1m) { throw new Exception(\"Must not execute during editing\"); }\n    protected override void OnBar(InstrumentContext market, Bar bar)\n    {\n        market.BuyNotional(100m);\n    }\n}\n";
 
-    /// <summary>Delivers test characters only to a control owned by this smoke-test process.</summary>
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern nint SendMessage(nint handle, uint message, nint wParam, nint lParam);
 
-    /// <summary>Checks semantic assistance, reference changes, editing, stale responses, and rendered editor layouts.</summary>
-    internal static void Run(string directory)
+    /// <summary>Checks semantic assistance, actual WPF editor operations, revision cancellation, and undo.</summary>
+    internal static async Task RunAsync(string directory)
     {
         var path = Path.Combine(Path.GetFullPath(directory), "EditorFixture.cs");
         using var language = new StrategyLanguageService();
@@ -44,63 +41,73 @@ internal static class StrategyEditorSmokeTest
         Require(errors.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.Id).Order().SequenceEqual(compilerErrors), "Editor/compiler diagnostics differ.");
         VerifyReferences(language, directory, path);
 
-        using var form = new Form { Size = new Size(1000, 700), ShowInTaskbar = false, Opacity = 0 };
+
         using var editor = new StrategyEditor();
-        form.Controls.Add(editor); form.Show(); Application.DoEvents();
+        var window = new Window { Width = 1000, Height = 700, Content = editor };
+        ShowHidden(window); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
         editor.LoadSource(ValidSource, path, []);
         var changed = 0;
         editor.SourceChanged += (_, _) => changed++;
-        Wait(editor.AnalyzeAsync());
+        await editor.AnalyzeAsync();
         Require(changed == 0 && editor.Diagnostics.All(d => d.Severity != DiagnosticSeverity.Error), "Diagnostics dirtied valid source or failed.");
-        editor.TextView.Colorize(0, -1);
-        Require(editor.TextView.GetStyleAt(0) == ScintillaNET.Style.Cpp.Word, "C# syntax highlighting was not applied.");
+        Require(editor.TextView.SyntaxHighlighting.Name == "C#", "C# syntax highlighting was not configured.");
         editor.LoadSource(broken, path, []);
-        Wait(editor.AnalyzeAsync());
-        Require(editor.Diagnostics.Any(d => d.Id == "CS1061"), "Live diagnostics missing from the editor.");
+        await editor.AnalyzeAsync();
+        Require(editor.Diagnostics.Any(d => d.Id == "CS1061"), "Live editor diagnostics are missing.");
         editor.Navigate(missing.Location.SourceSpan);
-        Require(editor.TextView.SelectedText == "DoesNotExist", "Native selection lost Unicode diagnostic offsets.");
-        Capture(form, Path.Combine(directory, "strategy-editor-diagnostics.png"));
+        Require(editor.TextView.SelectedText == "DoesNotExist", "AvalonEdit selection lost Unicode diagnostic offsets.");
+        await CaptureAsync(window, Path.Combine(directory, "strategy-editor-diagnostics.png"), 1000, 700);
         var stale = editor.AnalyzeAsync();
         editor.LoadSource(ValidSource, path, []);
-        Wait(stale); Wait(editor.AnalyzeAsync());
+        await stale; await editor.AnalyzeAsync();
         Require(!editor.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error), "Stale diagnostics replaced the current document.");
 
         editor.LoadSource("class T{void M(){int x=1;}}\r\n", path, []);
         var unformatted = editor.SourceText;
-        Wait(editor.FormatAsync());
+        await editor.FormatAsync();
         Require(editor.SourceText.Contains("int x = 1;", StringComparison.Ordinal) && editor.SourceText.Contains("\r\n", StringComparison.Ordinal), "Formatting or CRLF preservation failed.");
         editor.TextView.Undo(); Require(editor.SourceText == unformatted, "Formatting was not one undo step.");
         editor.LoadSource("    alpha();\r\n    beta();\r\n", path, []);
         var uncommented = editor.SourceText;
-        editor.TextView.SetSelection(editor.TextView.TextLength, 0); editor.ToggleComments();
+        editor.TextView.Select(0, editor.TextView.Document.TextLength); editor.ToggleComments();
         Require(editor.SourceText == "    //alpha();\r\n    //beta();\r\n", "Selected line commenting failed.");
         editor.ToggleComments(); Require(editor.SourceText == uncommented, "Comment toggle did not restore the selection.");
-        editor.TextView.Undo(); Require(editor.SourceText.Contains("//alpha", StringComparison.Ordinal), "Comment toggling broke undo.");
+        editor.TextView.Undo(); Require(editor.SourceText.Contains("//alpha", StringComparison.Ordinal), "Comment toggle broke undo.");
 
-        editor.LoadSource("class T ", path, []); editor.TextView.GotoPosition(editor.TextView.TextLength);
-        Type(editor.TextView, "{"); Require(editor.SourceText == "class T {}", "Opening brace did not close automatically.");
-        Type(editor.TextView, "\r"); Require(editor.SourceText == "class T {\n    \n}", "Block indentation failed: " + editor.SourceText.Replace("\n", "\\n"));
-        editor.LoadSource("", path, []); Type(editor.TextView, "()");
-        Require(editor.SourceText == "()", "Typing a closing delimiter duplicated the automatic delimiter.");
-        editor.LoadSource("// ", path, []); editor.TextView.GotoPosition(3); Type(editor.TextView, "(");
-        Require(editor.SourceText == "// (", "Bracket completion altered a comment: " + editor.SourceText + " style=" + editor.TextView.GetStyleAt(3));
+        editor.LoadSource("class T ", path, []); editor.TextView.CaretOffset = editor.TextView.Document.TextLength;
+        Type(editor, "{"); Require(editor.SourceText == "class T {}", "Opening brace did not close automatically.");
+        editor.InsertNewLine(); Require(editor.SourceText == "class T {\n    \n}", "Block indentation failed: " + editor.SourceText.Replace("\n", "\\n"));
+        editor.TextView.Undo(); Require(editor.SourceText == "class T {}", "Newline indentation was not one undo step.");
+        editor.LoadSource("", path, []); Type(editor, "()");
+        Require(editor.SourceText == "()", "Typing a closer duplicated the automatic delimiter.");
+        editor.TextView.Undo(); Require(editor.SourceText == "", "Paired delimiters were not one undo step.");
+        editor.LoadSource("class T {\n    ", path, []); editor.TextView.CaretOffset = editor.TextView.Document.TextLength;
+        Type(editor, "}"); Require(editor.SourceText == "class T {\n}", "Closing brace did not align with its opening block.");
+        editor.LoadSource("// ", path, []); editor.TextView.CaretOffset = 3; Type(editor, "(");
+        Require(editor.SourceText == "// (", "Bracket completion altered a comment.");
+        editor.LoadSource("var s = \"text \";", path, []); editor.TextView.CaretOffset = 14; Type(editor, "(");
+        Require(editor.SourceText == "var s = \"text (\";", "Bracket completion altered a string.");
 
-        editor.LoadSource(incomplete, path, []); editor.TextView.GotoPosition(position); editor.TextView.Focus();
-        Wait(editor.ShowCompletionsAsync());
-        Require(editor.TextView.AutoCActive, "Native completion popup did not open. Focus=" + editor.TextView.Focused + "; " + string.Join("; ", Descendants(editor).OfType<StatusStrip>().SelectMany(s => s.Items.Cast<ToolStripItem>()).Select(i => i.Text)));
-        editor.TextView.AutoCSelect("BuyNotional"); editor.TextView.ExecuteCmd(Command.Tab);
-        WaitUntil(() => editor.SourceText.Contains("market.BuyNotional;", StringComparison.Ordinal), "Native completion did not commit.");
+        editor.LoadSource(incomplete, path, []); editor.TextView.CaretOffset = position; editor.TextView.Focus();
+        await editor.ShowCompletionsAsync();
+        Require(editor.CurrentCompletion is not null, "AvalonEdit completion popup did not open.");
+        editor.CurrentCompletion!.CompletionList.SelectItem("BuyNotional");
+        editor.CurrentCompletion.CompletionList.RequestInsertion(EventArgs.Empty);
+        await WaitUntilAsync(() => editor.SourceText.Contains("market.BuyNotional;", StringComparison.Ordinal), "Completion did not commit.");
         editor.TextView.Undo(); Require(editor.SourceText == incomplete, "Completion commit broke undo.");
         editor.LoadSource(ValidSource, path, []);
-        Require(!editor.TextView.CanUndo, "Opening a document retained the previous document's undo history.");
-        var pendingFormat = editor.FormatAsync(); editor.SetReadOnly(true); Wait(pendingFormat);
+        Require(!editor.TextView.CanUndo, "Opening a document retained the previous undo history.");
+        var pendingFormat = editor.FormatAsync(); editor.SetReadOnly(true); await pendingFormat;
         editor.ToggleComments(); editor.ApplyChanges([new TextChange(new TextSpan(0, 0), "bad")]);
-        Require(editor.SourceText == ValidSource, "An editing command modified read-only source.");
+        Type(editor, "bad");
+        Require(editor.SourceText == ValidSource, "An edit modified read-only source.");
         editor.SetReadOnly(false);
-        VerifySearch(editor);
-        editor.LoadSource(ValidSource, path, []); Wait(editor.AnalyzeAsync());
-        form.Size = new Size(670, 430); Capture(form, Path.Combine(directory, "strategy-editor-compact.png"));
-        File.WriteAllText(Path.Combine(directory, "strategy-editor-tests.txt"), "PASS: semantic completion and commits, extension methods, quick info, signatures, reference changes, compiler parity, Unicode diagnostics and navigation, stale diagnostics, syntax styling, formatting and CRLF, comments, indentation, paired delimiters, undo, read-only edits, regex search/replacement, native layout.");
+        await VerifySearchAsync(editor, window, directory);
+        editor.LoadSource(ValidSource, path, []); await editor.AnalyzeAsync();
+        await CaptureAsync(window, Path.Combine(directory, "strategy-editor-compact.png"), 670, 430);
+        await CaptureAsync(window, Path.Combine(directory, "strategy-editor-high-dpi.png"), 1000, 700, 144);
+        window.Close();
+        File.WriteAllText(Path.Combine(directory, "strategy-editor-tests.txt"), "PASS: real Roslyn completion/commits, extension methods, quick info, signatures, reference changes, compiler parity, Unicode diagnostics/navigation, stale responses, C# highlighting, formatting/CRLF, comments, indentation, delimiters, undo, read-only edits, regex search/replacement, WPF layout and high-DPI rendering.");
     }
 
     /// <summary>Verifies that explicit reference DLLs participate in analysis and disappear when removed.</summary>
@@ -121,73 +128,29 @@ internal static class StrategyEditorSmokeTest
         Require(language.AnalyzeAsync(ValidSource, path, [], CancellationToken.None).GetAwaiter().GetResult().All(d => d.Severity != DiagnosticSeverity.Error), "Language service failed to recover after a missing reference.");
     }
 
-    /// <summary>Tests case, word, Unicode, regex replacement, and one-step undo through the actual search dialog.</summary>
-    private static void VerifySearch(StrategyEditor editor)
+
+    /// <summary>Checks regex search and replacement through the actual WPF search window.</summary>
+    private static async Task VerifySearchAsync(StrategyEditor editor, Window owner, string directory)
     {
-        Require(StrategySearchForm.CreateExpression("buy", false, true, false).Matches("buy BUY buyer prébuy").Count == 2, "Whole-word/case search failed.");
+        Require(StrategySearchWindow.CreateExpression("buy", false, true, false).Matches("buy BUY buyer prébuy").Count == 2, "Whole-word/case search failed.");
         editor.LoadSource("Buy(10); Buy(20);", "Strategy.cs", []);
-        using var dialog = new StrategySearchForm(editor);
-        dialog.ShowSearch(true, "Buy\\((\\d+)\\)", editor.FindForm());
-        var controls = Descendants(dialog).ToArray();
-        controls.OfType<CheckBox>().Single(c => c.Text == "Regular expression").Checked = true;
-        controls.OfType<TextBox>().Single(c => c.AccessibleName == "Replace in strategy").Text = "Sell($1)";
-        controls.OfType<Button>().Single(b => b.Text == "Replace all").PerformClick();
+        var dialog = new StrategySearchWindow(editor) { ShowInTaskbar = false, Opacity = 0 };
+        dialog.ShowSearch(true, "Buy\\((\\d+)\\)", owner);
+        dialog.regex.IsChecked = true;
+        dialog.replacement.Text = "Sell($1)";
+        dialog.ReplaceAll();
         Require(editor.SourceText == "Sell(10); Sell(20);", "Regex replacement failed.");
         editor.TextView.Undo(); Require(editor.SourceText == "Buy(10); Buy(20);", "Replace all was not one undo step.");
-        controls.OfType<TextBox>().Single(c => c.AccessibleName == "Find in strategy").Text = "(";
-        dialog.FindNext(false);
-        Require(controls.OfType<Label>().Single(c => c.AccessibleName == "Search result").Text.StartsWith("Invalid expression", StringComparison.Ordinal), "Invalid regex was not surfaced inline.");
+        dialog.query.Text = "("; dialog.FindNext(false);
+        Require(dialog.message.Text.StartsWith("Invalid expression", StringComparison.Ordinal), "Invalid regex was not surfaced inline.");
+        await CaptureAsync(dialog, Path.Combine(directory, "strategy-search.png"), 670, 270);
+        dialog.Close();
     }
 
-    /// <summary>Enumerates descendants for testing accessible search fields and buttons.</summary>
-    private static IEnumerable<Control> Descendants(Control control)
+    /// <summary>Delivers text through AvalonEdit's input pipeline without sending keys to other applications.</summary>
+    private static void Type(StrategyEditor editor, string text)
     {
-        foreach (Control child in control.Controls)
-        {
-            yield return child;
-            foreach (var descendant in Descendants(child)) yield return descendant;
-        }
-    }
-
-    /// <summary>Types into the native control without directing input to any other application.</summary>
-    private static void Type(Scintilla view, string text)
-    {
-        view.Focus();
-        foreach (var character in text)
-        {
-            if (character == '\r') view.ExecuteCmd(Command.NewLine);
-            else SendMessage(view.Handle, 0x0102, character, 0);
-        }
-    }
-
-    /// <summary>Runs the UI message pump until an awaited authoring operation completes.</summary>
-    private static void Wait(Task task)
-    {
-        WaitUntil(() => task.IsCompleted, "Editor operation timed out."); task.GetAwaiter().GetResult();
-    }
-
-    /// <summary>Waits for a native callback or continuation with a bounded smoke-test timeout.</summary>
-    private static void WaitUntil(Func<bool> complete, string message)
-    {
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        while (!complete())
-        {
-            if (watch.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException(message);
-            Application.DoEvents(); Thread.Sleep(10);
-        }
-    }
-
-    /// <summary>Captures the editor without showing an interactive test window.</summary>
-    private static void Capture(Form form, string path)
-    {
-        Application.DoEvents(); form.PerformLayout();
-        using var bitmap = new Bitmap(form.Width, form.Height);
-        form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size)); bitmap.Save(path);
-    }
-
-    /// <summary>Fails the smoke run when an authoring behavior differs from the user-visible contract.</summary>
-    private static void Require(bool condition, string message)
-    {
-        if (!condition) throw new InvalidOperationException(message);
+        editor.TextView.Focus();
+        foreach (var character in text) editor.TextView.TextArea.PerformTextInput(character.ToString());
     }
 }

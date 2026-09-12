@@ -1,55 +1,51 @@
+using System.Diagnostics;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Citrus.Data;
 using Citrus.Engine;
 
 namespace Citrus.Desktop;
 
-/// <summary>Runs offline desktop integration checks and captures native-control layouts on Windows.</summary>
+/// <summary>Checks real WPF views, AvalonEdit behavior, and offline workspace integration.</summary>
 internal static class DesktopSmokeTest
 {
-    /// <summary>Runs async editor checks under the same persistent Windows Forms synchronization context as the application.</summary>
-    internal static int RunWithMessageLoop(string directory)
-    {
-        using var host = new Form { ShowInTaskbar = false, Opacity = 0 };
-        var result = 1;
-        host.Shown += (_, _) => host.BeginInvoke(() =>
-        {
-            try { result = Run(directory); }
-            finally { host.Close(); }
-        });
-        Application.Run(host);
-        return result;
-    }
+    internal static bool IsRunning { get; private set; }
 
-    /// <summary>Verifies example execution, replay, strict configuration parsing, errors, result binding, and form rendering.</summary>
-    internal static int Run(string directory)
+    /// <summary>Runs the desktop regression suite on the application dispatcher and writes diagnostic artifacts.</summary>
+    internal static async Task<int> RunAsync(string directory)
     {
+        directory = Path.GetFullPath(directory);
         Directory.CreateDirectory(directory);
+        IsRunning = true;
         try
         {
             VerifyEquityChart(directory);
-            StrategyEditorSmokeTest.Run(directory);
-            var globalPath = Path.Combine(Path.GetFullPath(directory), "global-config.json");
-            using (var settingsForm = new GlobalSettingsForm(globalPath))
-            {
-                Capture(settingsForm, Path.Combine(directory, "global-settings.png"), new Size(680, 390));
-                var fields = Descendants(settingsForm).OfType<TextBox>().ToArray();
-                var keyField = fields.Single(c => c.AccessibleName == "Alpaca API key ID");
-                var secretField = fields.Single(c => c.AccessibleName == "Alpaca API secret key");
-                if (!keyField.UseSystemPasswordChar || !secretField.UseSystemPasswordChar)
-                    throw new InvalidOperationException("Credentials must start masked.");
-                keyField.Text = "fixture-key";
-                secretField.Text = "fixture-secret";
-                ((Button)settingsForm.AcceptButton!).PerformClick();
-                if (GlobalConfiguration.Load(globalPath).AlpacaApiSecretKey != "fixture-secret")
-                    throw new InvalidOperationException("Global settings were not saved.");
-            }
-            using (var cancelled = new GlobalSettingsForm(globalPath))
-            {
-                Descendants(cancelled).OfType<TextBox>().Single(c => c.AccessibleName == "Alpaca API secret key").Text = "discard";
-                cancelled.Close();
-                if (GlobalConfiguration.Load(globalPath).AlpacaApiSecretKey != "fixture-secret")
-                    throw new InvalidOperationException("Cancel changed global settings.");
-            }
+            await StrategyEditorSmokeTest.RunAsync(directory);
+            var globalPath = Path.Combine(directory, "global-config.json");
+            // Start from a fixture so rerunning the suite does not depend on previous user input.
+            Json.Write(globalPath, new GlobalConfiguration());
+            var settings = new GlobalSettingsWindow(globalPath);
+            await CaptureAsync(settings, Path.Combine(directory, "global-settings.png"), 720, 480);
+            Require(settings.key.Visibility == Visibility.Visible && settings.secret.Visibility == Visibility.Visible
+                && settings.visibleSecret.Visibility == Visibility.Collapsed, "Credentials must start masked.");
+            settings.key.Password = "fixture-key"; settings.secret.Password = "fixture-secret";
+            settings.reveal.IsChecked = true;
+            Require(settings.visibleSecret.Text == "fixture-secret", "Revealing credentials lost the saved value.");
+            settings.visibleSecret.Text = "edited-secret";
+            settings.reveal.IsChecked = false;
+            Require(settings.secret.Password == "edited-secret" && settings.visibleSecret.Text == "", "Masking did not transfer and clear visible credentials.");
+            Require(settings.SaveSettings(), "Global settings save failed."); settings.Close();
+            Require(GlobalConfiguration.Load(globalPath).AlpacaApiSecretKey == "edited-secret", "Global settings were not persisted.");
+            var cancelled = new GlobalSettingsWindow(globalPath);
+            await CaptureAsync(cancelled, Path.Combine(directory, "global-settings-compact.png"), 620, 460);
+            cancelled.secret.Password = "discard"; cancelled.Close();
+            Require(GlobalConfiguration.Load(globalPath).AlpacaApiSecretKey == "edited-secret", "Cancel changed saved settings.");
+            var damagedPath = Path.Combine(directory, "damaged-settings.json");
+            File.WriteAllText(damagedPath, "{broken");
+            var damaged = new GlobalSettingsWindow(damagedPath);
+            ShowHidden(damaged); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Require(!damaged.SaveSettings() && File.ReadAllText(damagedPath) == "{broken", "Damaged settings were overwritten.");
+            damaged.Close();
             var library = Path.Combine(Path.GetFullPath(directory), "historical-library");
             Directory.CreateDirectory(library);
             var exampleLibrary = Path.Combine(Path.GetFullPath(directory), "example-library");
@@ -71,19 +67,14 @@ internal static class DesktopSmokeTest
             if (Json.Read<MarketDataset>(exported).Bars.Count != 24) throw new InvalidOperationException("Historical export lost bars.");
             ExpectFailure(() => HistoricalDataLibrary.Export(Path.Combine(library, "broken.json"), exported));
             if (Json.Read<MarketDataset>(exported).Bars.Count != 24) throw new InvalidOperationException("Invalid export damaged an existing file.");
-            using (var history = new HistoricalDataForm(library))
-            {
-                Capture(history, Path.Combine(directory, "historical-data.png"), new Size(1100, 760));
-                var historyGrid = Descendants(history).OfType<DataGridView>().Single();
-                var historyWait = System.Diagnostics.Stopwatch.StartNew();
-                while (historyGrid.Rows.Count != 3)
-                {
-                    if (historyWait.Elapsed > TimeSpan.FromSeconds(10)) throw new TimeoutException("Historical library did not load.");
-                    Application.DoEvents(); Thread.Sleep(10);
-                }
-                Capture(history, Path.Combine(directory, "historical-data.png"), new Size(1100, 760));
-                Capture(history, Path.Combine(directory, "historical-data-compact.png"), new Size(900, 700));
-            }
+
+            var history = new HistoricalDataWindow(library);
+            ShowHidden(history);
+            await WaitUntilAsync(() => history.grid.Items.Count == 3, "Historical library did not load.");
+            Require(history.grid.Columns.Any(c => c.Header as string == "Instruments"), "Instrument metadata column is missing.");
+            await CaptureAsync(history, Path.Combine(directory, "historical-data.png"), 1100, 760);
+            await CaptureAsync(history, Path.Combine(directory, "historical-data-compact.png"), 900, 700);
+            history.Close();
             var first = BacktestWorkspace.RunAsync(path, config, exampleLibrary).GetAwaiter().GetResult();
             if (first.Result.Fills.Count != 1 || first.Result.Equity.Count < 365)
                 throw new InvalidOperationException("Example did not execute the expected holding strategy.");
@@ -96,72 +87,83 @@ internal static class DesktopSmokeTest
             ExpectFailure(() => BacktestWorkspace.Parse("{\"unknownSetting\":1}"));
             ExpectFailure(() => BacktestWorkspace.RunAsync(path, config, Path.Combine(directory, "missing-cache")).GetAwaiter().GetResult());
             ExpectFailure(() => BacktestWorkspace.RunAsync(path, config with { Start = DateTimeOffset.Parse("2025-01-02T00:00:00Z"), End = DateTimeOffset.Parse("2025-01-01T00:00:00Z") }, library).GetAwaiter().GetResult());
-            using var form = new MainForm(historicalDataDirectory: exampleLibrary);
-            form.LoadConfiguration(StrategyFolder.Root(path)!);
-            var selector = Descendants(form).OfType<ToolStrip>().SelectMany(t => t.Items.OfType<ToolStripComboBox>()).Single();
-            selector.SelectedItem = "HigherCosts";
-            if (Descendants(form).OfType<ConfigurationEditor>().Single().ReadConfiguration().InitialCash != 75000)
-                throw new InvalidOperationException("Named backtest selection did not load its settings.");
-            selector.SelectedItem = "Default";
-            form.Present(first);
-            Capture(form, Path.Combine(directory, "desktop-overview.png"), new Size(1280, 850));
-            Capture(form, Path.Combine(directory, "desktop-compact.png"), new Size(900, 620));
-            var controls = Descendants(form).ToArray();
-            var editors = controls.OfType<StrategyEditor>().ToArray();
-            var tabs = controls.OfType<TabControl>().Single();
-            tabs.SelectedIndex = 0;
-            Application.DoEvents();
-            editors.Single().TextView.AppendText("\n// Desktop save verification\n");
-            tabs.SelectedIndex = 1;
-            Application.DoEvents();
-            var configEditor = controls.OfType<ConfigurationEditor>().Single();
-            if (System.Text.Json.JsonSerializer.Serialize(configEditor.ReadConfiguration(), Json.Options) != System.Text.Json.JsonSerializer.Serialize(config, Json.Options))
-                throw new InvalidOperationException("Configuration controls changed untouched settings.");
-            controls.OfType<NumericUpDown>().Single(e => e.AccessibleName == "Initial Cash").Value = 125000;
-            var spread = controls.OfType<NumericUpDown>().Single(e => e.AccessibleName == "Spread (basis points)");
-            spread.Value = 2;
-            if (configEditor.ReadConfiguration().Simulation.SpreadBps != 2)
-                throw new InvalidOperationException("Simulation control changes were not captured.");
-            spread.Value = config.Simulation.SpreadBps;
-            var pending = form.RunAsync();
-            var timeout = System.Diagnostics.Stopwatch.StartNew();
-            while (!pending.IsCompleted)
-            {
-                if (timeout.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Desktop background run did not complete.");
-                Application.DoEvents();
-                Thread.Sleep(10);
-            }
-            pending.GetAwaiter().GetResult();
-            if (Json.Read<RunConfiguration>(path).InitialCash != 125000) throw new InvalidOperationException("Configuration changes were not saved.");
-            if (!File.ReadAllText(StrategyFolder.Source(path, config)).Contains("Desktop save verification"))
-                throw new InvalidOperationException("Source changes were not saved.");
-            if (before == File.ReadAllText(equityPath)) throw new InvalidOperationException("Updated capital did not change exports.");
-            if (editors.Any(e => e.TextView.ReadOnly)) throw new InvalidOperationException("Editors remained read-only after completion.");
+
+            var window = new MainWindow(null, exampleLibrary);
+            ShowHidden(window); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.LoadConfiguration(StrategyFolder.Root(path)!);
+            window.backtests.Items.Cast<MenuItem>().Single(item => item.Tag as string == "HigherCosts")
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Require(window.configEditor.ReadConfiguration().InitialCash == 75000, "Named backtest selection did not load.");
+            window.backtests.Items.Cast<MenuItem>().Single(item => item.Tag as string == "Default")
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            window.Present(first);
+            Require(window.fills.Items.Count == 1, "Fill results were not bound.");
+            window.tabs.SelectedIndex = 4;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var symbolColumn = window.fills.Columns.Single(c => c.Header as string == "instrument.symbol");
+            Require(symbolColumn.GetCellContent(window.fills.Items[0]) is TextBlock { Text: "BTC" },
+                "Flattened instrument column did not render its value.");
+            window.tabs.SelectedIndex = 2;
+            await CaptureAsync(window, Path.Combine(directory, "desktop-overview.png"), 1280, 850);
+            await CaptureAsync(window, Path.Combine(directory, "desktop-compact.png"), 900, 620);
+
+            window.tabs.SelectedIndex = 0;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.strategyEditor.TextView.AppendText("\n// Desktop save verification\n");
+            window.tabs.SelectedIndex = 1;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var editor = window.configEditor;
+            Require(System.Text.Json.JsonSerializer.Serialize(editor.ReadConfiguration(), Json.Options) ==
+                System.Text.Json.JsonSerializer.Serialize(config, Json.Options), "Untouched configuration values changed.");
+            editor.InitialCash.Text = "125000";
+            editor.SpreadBps.Text = "2.123456789";
+            Require(editor.ReadConfiguration().Simulation.SpreadBps == 2.123456789m, "Simulation precision was lost.");
+            editor.SpreadBps.Text = config.Simulation.SpreadBps.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            editor.Seed.Text = "-42";
+            Require(editor.ReadConfiguration().Seed == -42, "Signed seed values were rejected.");
+            editor.Seed.Text = config.Seed.ToString();
+            editor.Start.Text = "2024-01-01T02:00:00+02:00";
+            Require(editor.ReadConfiguration().Start == DateTimeOffset.Parse("2024-01-01T00:00:00Z"), "Date conversion did not retain the instant.");
+            editor.Start.Clear();
+            editor.InitialCash.Text = "not a number"; ExpectFailure(() => editor.ReadConfiguration()); editor.InitialCash.Text = "125000";
+            var pending = window.RunAsync();
+            Require(window.strategyEditor.TextView.IsReadOnly, "Source remained writable during a backtest.");
+            await pending.WaitAsync(TimeSpan.FromSeconds(45));
+            Require(Json.Read<RunConfiguration>(path).InitialCash == 125000, "Configuration edits were not saved.");
+            Require(File.ReadAllText(StrategyFolder.Source(path, config)).Contains("Desktop save verification"), "Source edits were not saved.");
+            Require(before != File.ReadAllText(equityPath), "Updated capital did not affect exported equity.");
+            Require(!window.strategyEditor.TextView.IsReadOnly && window.menu.IsEnabled && window.configPage.IsEnabled, "Controls were not restored after the run.");
             foreach (var (index, name) in new[] { (0, "strategy"), (1, "configuration"), (4, "fills") })
             {
-                tabs.SelectedIndex = index;
-                if (index == 0)
-                {
-                    var analyzed = editors.Single().AnalyzeAsync();
-                    var analysisWait = System.Diagnostics.Stopwatch.StartNew();
-                    while (!analyzed.IsCompleted)
-                    {
-                        if (analysisWait.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Editor analysis did not complete.");
-                        Application.DoEvents(); Thread.Sleep(10);
-                    }
-                    analyzed.GetAwaiter().GetResult();
-                }
-                Capture(form, Path.Combine(directory, "desktop-" + name + ".png"), new Size(1280, 850));
-                if (index == 1) Capture(form, Path.Combine(directory, "desktop-configuration-compact.png"), new Size(900, 620));
+                window.tabs.SelectedIndex = index;
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                if (index == 0) await window.strategyEditor.AnalyzeAsync();
+                await CaptureAsync(window, Path.Combine(directory, "desktop-" + name + ".png"), 1280, 850);
+                if (index == 1) await CaptureAsync(window, Path.Combine(directory, "desktop-configuration-compact.png"), 900, 620);
             }
-            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: example, exports, deterministic replay, preserved files, strict JSON, missing data, conflicting data mode, result binding, native form rendering, document saves, background UI run, controls restored after completion.");
+            editor.References.Text = Path.Combine(directory, "missing-strategy-reference.dll");
+            var failed = false;
+            try { await window.RunAsync(); }
+            catch (InvalidOperationException) { failed = true; }
+            Require(failed && window.fills.Items.Count == 0 && window.metrics.Text == "No completed backtest",
+                "A failed background run left stale results visible.");
+            Require(!window.strategyEditor.TextView.IsReadOnly && window.menu.IsEnabled && window.configPage.IsEnabled,
+                "A failed run left the workspace locked.");
+            window.Close();
+            var errorWindow = new ErrorWindow();
+            errorWindow.SetError("Offline fixture error", new IOException("A fixture file could not be opened."));
+            await CaptureAsync(errorWindow, Path.Combine(directory, "error-dialog.png"), 820, 480); errorWindow.Close();
+            var lineWindow = new GoToLineWindow(100, 42);
+            await CaptureAsync(lineWindow, Path.Combine(directory, "go-to-line.png"), 350, 175); lineWindow.Close();
+            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: WPF rendering, AvalonEdit authoring, settings save/cancel/masking, damaged settings protection, historical library, offline backtests, deterministic replay, output preservation, strict JSON, configuration precision, background execution, result binding, source/configuration saves and restored controls.");
             return 0;
         }
-        catch (Exception exception)
+        catch (Exception error)
         {
-            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), exception.ToString());
+            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), error.ToString());
             return 1;
         }
+        finally { IsRunning = false; }
     }
 
     /// <summary>Renders edge cases and checks UTC conversion, extrema, and replacement of previous runs.</summary>
@@ -194,27 +196,55 @@ internal static class DesktopSmokeTest
         throw new InvalidOperationException("Invalid input unexpectedly succeeded.");
     }
 
-    /// <summary>Enumerates native descendants so integration checks can edit documents and select tabs.</summary>
-    private static IEnumerable<Control> Descendants(Control parent)
+
+    /// <summary>Shows a test window without displaying an interactive desktop surface.</summary>
+    internal static void ShowHidden(Window window)
     {
-        foreach (Control child in parent.Controls)
+        window.ShowInTaskbar = false;
+        window.Opacity = 0;
+        window.Show();
+    }
+
+    /// <summary>Captures the arranged WPF content at normal or high-DPI output resolution.</summary>
+    internal static async Task CaptureAsync(Window window, string path, double width, double height, double dpi = 96)
+    {
+        window.Width = width; window.Height = height;
+        if (!window.IsVisible) ShowHidden(window);
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        window.UpdateLayout();
+        var content = (FrameworkElement)window.Content;
+        var bounds = new Rect(0, 0, content.ActualWidth + content.Margin.Left + content.Margin.Right,
+            content.ActualHeight + content.Margin.Top + content.Margin.Bottom);
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
         {
-            yield return child;
-            foreach (var descendant in Descendants(child)) yield return descendant;
+            drawing.DrawRectangle(window.Background ?? Brushes.White, null, bounds);
+            drawing.DrawRectangle(new VisualBrush(content), null, new Rect(content.Margin.Left, content.Margin.Top,
+                content.ActualWidth, content.ActualHeight));
+        }
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(bounds.Width * dpi / 96),
+            (int)Math.Ceiling(bounds.Height * dpi / 96), dpi, dpi, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var output = File.Create(path);
+        encoder.Save(output);
+    }
+
+    /// <summary>Waits for dispatcher callbacks without blocking the UI thread.</summary>
+    internal static async Task WaitUntilAsync(Func<bool> complete, string message)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!complete())
+        {
+            if (watch.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException(message);
+            await Task.Delay(10);
         }
     }
 
-    /// <summary>Renders the form without opening an interactive window.</summary>
-    private static void Capture(Form form, string path, Size size)
+    /// <summary>Fails a smoke check with the user-visible behavior that regressed.</summary>
+    internal static void Require(bool condition, string message)
     {
-        form.Size = size;
-        form.ShowInTaskbar = false;
-        form.Opacity = 0;
-        form.Show();
-        Application.DoEvents();
-        form.PerformLayout();
-        using var bitmap = new Bitmap(form.Width, form.Height);
-        form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
-        bitmap.Save(path);
+        if (!condition) throw new InvalidOperationException(message);
     }
 }

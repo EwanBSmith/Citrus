@@ -16,7 +16,7 @@ The first release focuses on the backtesting engine and file-based C# strategy d
 
 A user writes a strategy as C# source code. A strategy may contain one or more substrategies and may operate across one or more symbols. The initial implementation may compile strategy source code before execution. Its strategy-facing interfaces shall not prevent interpreted C# execution from being added later.
 
-The initial GUI uses Windows Forms on Windows, styled as classic enterprise Windows software. A user can edit strategy scripts, configure and start backtests, and analyse results. The cross-platform requirement applies to the engine and CLI, not the GUI.
+The GUI uses WPF and XAML on Windows, with AvalonEdit for C# strategy editing and a classic desktop workbench layout. A user can edit strategy scripts, configure and start backtests, and analyse results. Views shall support the Visual Studio XAML Designer without loading user settings, historical datasets, or strategy assemblies. The cross-platform requirement applies to the engine and CLI, not the GUI.
 
 ### 2.3 Backtesting
 
@@ -43,7 +43,7 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-PLAT-004** A strategy definition shall run in backtesting and live trading without modification, except for behaviour explicitly selected through runtime context.
 - **UR-PLAT-005** Citrus shall provide a graphical user interface for strategy creation.
 - **UR-PLAT-006** Citrus shall provide a command-line interface for deployment and execution.
-- **UR-PLAT-007** The Citrus engine and CLI shall run on Windows, macOS, and Linux. The GUI is exempt from this requirement and shall initially use Windows Forms on Windows.
+- **UR-PLAT-007** The Citrus engine and CLI shall run on Windows, macOS, and Linux. The GUI is exempt from this requirement and shall use WPF on Windows, with XAML views and AvalonEdit for source editing.
 
 ### 3.2 Release scope
 

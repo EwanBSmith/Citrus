@@ -18,7 +18,7 @@ These commands work on Windows, macOS, and Linux. The automated test executable 
 
 ## Windows desktop workbench
 
-The initial GUI uses Windows Forms with native menus, a toolbar, a workspace tree, split panes, tabbed editors, sortable result tables, and a ScottPlot equity chart with UTC dates, mouse pan/zoom, and right-click image export. The engine and CLI remain cross-platform; the desktop application requires Windows 10 version 2004 or later and the .NET 10 Desktop Runtime (included with the Windows SDK).
+The GUI uses WPF with XAML menus, a workspace tree, resizable panes, tabbed editors, sortable result tables, and a ScottPlot WPF equity chart with UTC dates, mouse pan/zoom, and right-click image export. The engine and CLI remain cross-platform; the desktop application requires Windows 10 version 2004 or later and the .NET 10 Desktop Runtime. Install the .NET 10 SDK to build it.
 
 ```sh
 dotnet restore Citrus.slnx --configfile NuGet.Config
@@ -26,9 +26,9 @@ dotnet build Citrus.slnx -c Release --no-restore
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
 ```
 
-Choose **New example** to create an offline strategy folder and seed example prices into the main cache, or **Open** a strategy folder. Each folder contains `Strategy.cs` and `Backtests/Default.json`. Select a named backtest from the toolbar; **Copy backtest** creates another configuration with its own results directory. Edit C# on the Strategy tab and settings in the Configuration form. **Save all** (`Ctrl+S`) saves both; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports reports. Switching configurations prompts to save outstanding edits. The application also accepts a strategy folder or legacy run JSON as its first argument.
+Choose **File → Create example** to create an offline strategy folder and seed example prices into the main cache, or **Open** a strategy folder. Each folder contains `Strategy.cs` and `Backtests/Default.json`. Select a named backtest from **Backtest → Select backtest**; **Backtest → Copy backtest** creates another configuration with its own results directory. Edit C# on the Strategy tab and settings in the Configuration form. **Save all** (`Ctrl+S`) saves both; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports reports. Switching configurations prompts to save outstanding edits. The application also accepts a strategy folder or legacy run JSON as its first argument.
 
-The Strategy tab uses [Scintilla](https://github.com/desjarlais/Scintilla.NET) with Roslyn C# language services, bundled through NuGet. It provides syntax colours, line numbers, folding, indentation guides, matching and closing brackets, automatic indentation, undo/redo, completion for Citrus APIs and configured assemblies, hover information, and method signatures. Click the gutter to fold a block; **Edit** also offers collapse/expand commands. Editing works offline after restore, without a browser runtime or language server.
+The Strategy tab uses [AvalonEdit](https://github.com/icsharpcode/AvalonEdit) with Roslyn C# language services, bundled through NuGet. It provides syntax colours, line numbers, folding, indentation guides, matching and closing brackets, automatic indentation, undo/redo, completion for Citrus APIs and configured assemblies, hover information, and method signatures. Click the gutter to fold a block; **Edit** also offers collapse/expand commands. Editing works offline after restore, without a browser runtime or language server.
 
 Compiler errors and warnings update after a short typing pause, with squiggles and a **Problems** list. Double-click a problem or press Enter on its row to navigate to the source. Live checks analyze unsaved text without saving or executing it. **Validate** additionally loads and constructs the strategy, checking the executable strategy contract. Edited assembly references resolve relative to the run file. Missing or invalid references appear as a code assistance error in the editor status strip.
 
@@ -47,7 +47,7 @@ Compiler errors and warnings update after a short typing pause, with squiggles a
 
 Find/replace supports match case, whole words, and regular expressions. Regex replacements support capture groups such as `$1`; literal mode inserts replacement text exactly. Replace all, formatting, and comment commands each form one undo step. Formatting uses four spaces and preserves LF or CRLF line endings. Source editing is locked during validation and execution; opening another source resets the undo history.
 
-Configuration paths resolve relative to the run JSON. Strategies select the instruments they trade. A run selects an interval plus optional UTC bounds; Citrus assembles every matching instrument from the main historical cache without provider access.
+Configuration paths resolve relative to the strategy folder for named backtests, or to the run JSON for legacy standalone configurations. Numeric fields use a decimal point and preserve untouched precision. Optional date bounds accept ISO 8601 timestamps, such as `2024-01-01T00:00:00Z`; leave a field blank to remove its boundary. Strategies select the instruments they trade. A run selects an interval plus optional UTC bounds; Citrus assembles every matching instrument from the main historical cache without provider access.
 
 Overview reports portfolio performance and equity. Result tabs expose orders, fills, positions, costs, equity (including substrategy balances), and instrument attribution; click a column to sort or use `Ctrl+C` to copy selected rows. Tables show the first 5,000 records; **Results folder** opens the complete JSON/CSV exports. Runs replace matching report files. Prior results are cleared when a new run starts so a failed run cannot appear successful.
 
@@ -59,11 +59,13 @@ Windows-only offline integration and rendering checks:
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke
 ```
 
-The smoke check writes its outcome and layout PNGs to the specified folder, and returns a nonzero exit code on failure. It includes real Roslyn completion/diagnostic checks and native editor typing, replacement, undo, formatting, reference changes, and save/run integration. `Citrus.slnx` contains the complete product and is built as a solution on Windows. On macOS and Linux, build the CLI and test projects directly as shown above so the Windows desktop project is excluded.
+The smoke check writes its outcome and WPF layout PNGs to the specified folder, and returns a nonzero exit code on failure. It includes real Roslyn completion/diagnostic checks, AvalonEdit text input, replacement, undo, formatting, reference changes, settings masking/save/cancel, configuration precision, displayed result cells, and save/run integration. Normal, compact, and high-DPI rendering checks run on the WPF dispatcher. `Citrus.slnx` contains the complete product and is built as a solution on Windows. On macOS and Linux, build the CLI and test projects directly as shown above so the Windows desktop project is excluded.
+
+To edit the interface visually, open `src/Citrus.Desktop/MainWindow.xaml` in Visual Studio's XAML Designer after restoring and building the solution. Each window and reusable panel has its own `.xaml` layout and matching `.xaml.cs` behavior file. See [desktop development and designer guidance](docs/desktop-development.md).
 
 ## Global settings
 
-Open **Data → Historical data** (or the toolbar button) to download Alpaca equities or Hyperliquid perpetual history at hourly or daily intervals. Choose a symbol, venue, and UTC date range; the end date is exclusive. Alpaca uses Global settings credentials and the selected IEX/SIP feed. Downloads fetch missing history through the existing validated cache and can be cancelled.
+Open **Data → Historical data** to download Alpaca equities or Hyperliquid perpetual history at hourly or daily intervals. Choose a symbol, venue, and UTC date range; the end date is exclusive. Alpaca uses Global settings credentials and the selected IEX/SIP feed. Downloads fetch missing history through the existing validated cache and can be cancelled.
 
 The default library is `%LOCALAPPDATA%\Citrus\HistoricalData`. Set the main cache in **Global settings**; the `CITRUS_HISTORICAL_DATA` environment variable overrides it for automation. **Refresh** lists each JSON dataset's instruments, coverage bounds, bar count, size and structural validation status. Bounds do not guarantee gap-free coverage. Select a dataset to inspect its provider notes, export a normalized copy, or delete it after confirmation. Do not run another cache writer against the same folder while downloading.
 

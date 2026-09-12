@@ -1,0 +1,28 @@
+<Window x:Class="Citrus.Desktop.GlobalSettingsWindow" Style="{StaticResource {x:Type Window}}"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Global settings" Width="720" Height="480" MinWidth="620" MinHeight="460" WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+ <Grid Margin="16">
+  <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Label Content="Configuration file" Target="{Binding ElementName=location}"/>
+  <TextBox x:Name="location" Grid.Column="1" Margin="0,4" IsReadOnly="True" AutomationProperties.Name="Global configuration file"/>
+  <Label Grid.Row="1" Content="Alpaca API key ID" Target="{Binding ElementName=key}"/>
+  <Grid Grid.Row="1" Grid.Column="1" Margin="0,4">
+   <PasswordBox x:Name="key" AutomationProperties.Name="Alpaca API key ID"/>
+   <TextBox x:Name="visibleKey" Visibility="Collapsed" AutomationProperties.Name="Visible Alpaca API key ID"/>
+  </Grid>
+  <Label Grid.Row="2" Content="Alpaca API secret key" Target="{Binding ElementName=secret}"/>
+  <Grid Grid.Row="2" Grid.Column="1" Margin="0,4">
+   <PasswordBox x:Name="secret" AutomationProperties.Name="Alpaca API secret key"/>
+   <TextBox x:Name="visibleSecret" Visibility="Collapsed" AutomationProperties.Name="Visible Alpaca API secret key"/>
+  </Grid>
+  <Label Grid.Row="3" Content="Historical data cache" Target="{Binding ElementName=historicalData}"/>
+  <DockPanel Grid.Row="3" Grid.Column="1"><Button DockPanel.Dock="Right" Content="Browse…" Click="BrowseHistoricalData"/><TextBox x:Name="historicalData" Margin="0,4" AutomationProperties.Name="Historical data directory"/></DockPanel>
+  <CheckBox x:Name="reveal" Grid.Row="4" Grid.Column="1" Margin="0,8" Content="Show credentials" Checked="RevealCredentials" Unchecked="RevealCredentials"/>
+  <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,12" TextWrapping="Wrap" Text="Shared by all Citrus workspaces and the CLI. Backtests read matching datasets from this cache without downloading. Credentials are stored as plain text in your user profile; environment variables override saved values."/>
+  <TextBlock x:Name="errorText" Grid.Row="6" Grid.ColumnSpan="2" Foreground="Firebrick" TextWrapping="Wrap"/>
+  <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right">
+   <Button Content="Save" IsDefault="True" Click="SaveClicked"/><Button Content="Cancel" IsCancel="True" Click="CancelClicked"/>
+  </StackPanel>
+ </Grid>
+</Window>

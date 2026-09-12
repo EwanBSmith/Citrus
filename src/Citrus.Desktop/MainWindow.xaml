@@ -1,0 +1,111 @@
+<Window x:Class="Citrus.Desktop.MainWindow" Style="{StaticResource {x:Type Window}}"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:Citrus.Desktop"
+ Title="Citrus — Backtesting Workbench" Width="1280" Height="850" MinWidth="900" MinHeight="620"
+ WindowStartupLocation="CenterScreen">
+ <Window.CommandBindings>
+  <CommandBinding Command="{x:Static local:WorkbenchCommands.Action}" Executed="ExecuteCommand" CanExecute="CanExecuteCommand"/>
+ </Window.CommandBindings>
+ <Window.InputBindings>
+  <KeyBinding Key="O" Modifiers="Control" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Open"/>
+  <KeyBinding Key="S" Modifiers="Control" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Save"/>
+  <KeyBinding Key="F6" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Validate"/>
+  <KeyBinding Key="F5" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Run"/>
+ </Window.InputBindings>
+ <DockPanel>
+  <Menu x:Name="menu" DockPanel.Dock="Top">
+   <MenuItem Header="_File">
+    <MenuItem Header="_Open strategy…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Open" InputGestureText="Ctrl+O"/>
+    <MenuItem Header="Create _example…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Example" InputGestureText=""/>
+    <MenuItem Header="_Save all" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Save" InputGestureText="Ctrl+S"/>
+    <MenuItem Header="E_xit" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Exit" InputGestureText="Alt+F4"/>
+   </MenuItem>
+   <MenuItem Header="_Backtest">
+    <MenuItem x:Name="backtests" Header="_Select backtest" IsEnabled="False"/>
+    <MenuItem Header="_Copy backtest…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Copy"/>
+    <Separator/>
+    <MenuItem Header="_Validate strategy" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Validate" InputGestureText="F6"/>
+    <MenuItem Header="_Run backtest" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Run" InputGestureText="F5"/>
+    <MenuItem Header="Open results _folder" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Results" InputGestureText=""/>
+   </MenuItem>
+   <MenuItem Header="_Data">
+    <MenuItem Header="_Historical data…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="History" InputGestureText=""/>
+   </MenuItem>
+   <MenuItem Header="_Settings">
+    <MenuItem Header="_Global settings…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Settings" InputGestureText=""/>
+   </MenuItem>
+   <MenuItem Header="_Help">
+    <MenuItem Header="_About Citrus" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="About" InputGestureText=""/>
+   </MenuItem>
+  </Menu>
+  <StatusBar DockPanel.Dock="Bottom">
+   <StatusBarItem><TextBlock x:Name="status" Text="Ready — open a strategy folder or create an example" TextTrimming="CharacterEllipsis"/></StatusBarItem>
+   <StatusBarItem><ProgressBar x:Name="progress" Width="120" Height="14" IsIndeterminate="True" Visibility="Collapsed"/></StatusBarItem>
+  </StatusBar>
+  <Grid Margin="6">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="190" MinWidth="145"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="600"/></Grid.ColumnDefinitions>
+   <DockPanel>
+    <TextBlock DockPanel.Dock="Top" Text="WORKSPACE" FontWeight="SemiBold" Margin="10"/>
+    <TreeView x:Name="navigation" SelectedItemChanged="NavigateWorkspace">
+     <TreeViewItem Header="Backtest workspace" IsExpanded="True">
+      <TreeViewItem Header="Strategy" Tag="0"/>
+      <TreeViewItem Header="Configuration" Tag="1"/>
+      <TreeViewItem Header="Overview" Tag="2"/>
+      <TreeViewItem Header="Orders" Tag="3"/>
+      <TreeViewItem Header="Fills" Tag="4"/>
+      <TreeViewItem Header="Positions" Tag="5"/>
+      <TreeViewItem Header="Costs" Tag="6"/>
+      <TreeViewItem Header="Equity" Tag="7"/>
+      <TreeViewItem Header="Attribution" Tag="8"/>
+     </TreeViewItem>
+    </TreeView>
+   </DockPanel>
+   <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"/>
+   <Grid Grid.Column="2">
+    <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="260"/><RowDefinition Height="5"/><RowDefinition Height="100" MinHeight="60"/></Grid.RowDefinitions>
+    <TabControl x:Name="tabs">
+     <TabItem x:Name="strategyPage" Header="Strategy">
+      <DockPanel><TextBlock DockPanel.Dock="Top" Text="C# strategy • Ctrl+Space: complete • Ctrl+Shift+Space: parameters • F6: validate • F5: run" Margin="8" TextWrapping="Wrap"/>
+       <local:StrategyEditor x:Name="strategyEditor"/>
+      </DockPanel>
+     </TabItem>
+     <TabItem x:Name="configPage" Header="Configuration">
+      <DockPanel><TextBlock DockPanel.Dock="Top" Text="Paths are relative to the strategy folder. Rates and margins use fractions: 0.05 = 5%." Margin="8" TextWrapping="Wrap"/>
+       <local:ConfigurationEditor x:Name="configEditor"/>
+      </DockPanel>
+     </TabItem>
+     <TabItem Header="Overview">
+      <DockPanel><TextBlock x:Name="metrics" DockPanel.Dock="Top" Margin="12" Text="No completed backtest" TextWrapping="Wrap"/><local:EquityChart x:Name="chart"/></DockPanel>
+     </TabItem>
+     <TabItem Header="Orders"><DockPanel>
+      <TextBlock DockPanel.Dock="Top" Margin="8" TextWrapping="Wrap" Text="Completed run • UTC timestamps • Click headers to sort; Ctrl+C to copy. First 5,000 rows shown; full data is exported."/>
+      <DataGrid x:Name="orders" AutomationProperties.Name="Orders results"/>
+     </DockPanel></TabItem>
+     <TabItem Header="Fills"><DockPanel>
+      <TextBlock DockPanel.Dock="Top" Margin="8" TextWrapping="Wrap" Text="Completed run • UTC timestamps • Click headers to sort; Ctrl+C to copy. First 5,000 rows shown; full data is exported."/>
+      <DataGrid x:Name="fills" AutomationProperties.Name="Fills results"/>
+     </DockPanel></TabItem>
+     <TabItem Header="Positions"><DockPanel>
+      <TextBlock DockPanel.Dock="Top" Margin="8" TextWrapping="Wrap" Text="Completed run • UTC timestamps • Click headers to sort; Ctrl+C to copy. First 5,000 rows shown; full data is exported."/>
+      <DataGrid x:Name="positions" AutomationProperties.Name="Positions results"/>
+     </DockPanel></TabItem>
+     <TabItem Header="Costs"><DockPanel>
+      <TextBlock DockPanel.Dock="Top" Margin="8" TextWrapping="Wrap" Text="Completed run • UTC timestamps • Click headers to sort; Ctrl+C to copy. First 5,000 rows shown; full data is exported."/>
+      <DataGrid x:Name="costs" AutomationProperties.Name="Costs results"/>
+     </DockPanel></TabItem>
+     <TabItem Header="Equity"><DockPanel>
+      <TextBlock DockPanel.Dock="Top" Margin="8" TextWrapping="Wrap" Text="Completed run • UTC timestamps • Click headers to sort; Ctrl+C to copy. First 5,000 rows shown; full data is exported."/>
+      <DataGrid x:Name="equity" AutomationProperties.Name="Equity results"/>
+     </DockPanel></TabItem>
+     <TabItem Header="Attribution"><DockPanel>
+      <TextBlock DockPanel.Dock="Top" Margin="8" TextWrapping="Wrap" Text="Completed run • UTC timestamps • Click headers to sort; Ctrl+C to copy. First 5,000 rows shown; full data is exported."/>
+      <DataGrid x:Name="attribution" AutomationProperties.Name="Attribution results"/>
+     </DockPanel></TabItem>
+    </TabControl>
+    <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
+    <DockPanel Grid.Row="2"><TextBlock DockPanel.Dock="Top" Text="Execution log" Margin="6,3"/><TextBox x:Name="log" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="12" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="Execution log"/></DockPanel>
+   </Grid>
+  </Grid>
+ </DockPanel>
+</Window>

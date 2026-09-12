@@ -1,0 +1,5 @@
+<UserControl x:Class="Citrus.Desktop.EquityChart"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:plot="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF">
+ <plot:WpfPlot x:Name="plot" AutomationProperties.Name="Portfolio equity chart"/>
+</UserControl>

@@ -25,33 +25,12 @@ internal static class ErrorDialog
         return text;
     }
 
-    /// <summary>Shows the actual failure and copyable details in a resizable modal dialog.</summary>
-    internal static void Show(IWin32Window owner, string operation, Exception error)
+    /// <summary>Shows a redacted failure through the designable WPF error dialog.</summary>
+    internal static void Show(Window owner, string operation, Exception error)
     {
-        var hint = error switch
-        {
-            UnauthorizedAccessException => "Check access to the displayed file or folder.",
-            HttpRequestException => "Check the endpoint and HTTP status below. Authentication, feed access, and rate limits are different failures.",
-            OperationCanceledException => "The request was cancelled or timed out. Retry a smaller date range if it timed out.",
-            _ => "Review the details below before retrying."
-        };
-        var details = Redact(operation + Environment.NewLine + error);
-        using var dialog = new Form { Text = operation, Size = new Size(820, 480), MinimumSize = new Size(600, 360),
-            StartPosition = FormStartPosition.CenterParent, Font = new Font("Segoe UI", 9F) };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), RowCount = 3, ColumnCount = 1 };
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.Controls.Add(new Label { Text = Redact(error.Message) + Environment.NewLine + hint, AutoSize = true,
-            MaximumSize = new Size(740, 0), Padding = new Padding(0, 0, 0, 12) });
-        layout.Controls.Add(new TextBox { Text = details, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Both,
-            Dock = DockStyle.Fill, AccessibleName = "Error details" });
-        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
-        var close = new Button { Text = "Close", DialogResult = DialogResult.OK };
-        var copy = new Button { Text = "Copy details", AutoSize = true };
-        copy.Click += (_, _) => Clipboard.SetText(details);
-        buttons.Controls.Add(close); buttons.Controls.Add(copy); layout.Controls.Add(buttons);
-        dialog.Controls.Add(layout); dialog.AcceptButton = close; dialog.CancelButton = close;
-        dialog.ShowDialog(owner);
+        if (DesktopSmokeTest.IsRunning) throw new InvalidOperationException(operation, error);
+        var dialog = new ErrorWindow { Owner = owner };
+        dialog.SetError(operation, error);
+        dialog.ShowDialog();
     }
 }

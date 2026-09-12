@@ -1,16 +1,20 @@
 using Citrus.Engine;
-using ScottPlot.WinForms;
 
 namespace Citrus.Desktop;
 
 /// <summary>Displays portfolio equity against UTC time with ScottPlot pan, zoom, and image export.</summary>
-internal sealed class EquityChart : FormsPlot
+public partial class EquityChart : UserControl, IDisposable
 {
+    /// <summary>Gets the plot model for presentation and offline rendering checks.</summary>
+    internal ScottPlot.Plot Plot => plot.Plot;
+
+    /// <summary>Releases the WPF plotting surface after the owning window closes.</summary>
+    public void Dispose() => Plot.Dispose();
+
     /// <summary>Creates a resize-aware plot with UTC dates and an empty-run prompt.</summary>
-    internal EquityChart()
+    public EquityChart()
     {
-        Dock = DockStyle.Fill;
-        AccessibleName = "Portfolio equity chart";
+        InitializeComponent();
         Plot.Axes.DateTimeTicksBottom();
         Plot.XLabel("Time (UTC)");
         Plot.YLabel("Equity");
@@ -25,7 +29,7 @@ internal sealed class EquityChart : FormsPlot
         if (values.Count == 0)
         {
             Plot.Axes.SetLimits(0, 1, 0, 1);
-            Refresh();
+            plot.Refresh();
             return;
         }
 
@@ -51,6 +55,6 @@ internal sealed class EquityChart : FormsPlot
         Plot.Axes.AutoScale();
         Plot.Axes.SetLimitsY(minimum - padding, maximum + padding);
         if (dates[0] == dates[^1]) Plot.Axes.SetLimitsX(dates[0] - .5, dates[0] + .5);
-        Refresh();
+        plot.Refresh();
     }
 }

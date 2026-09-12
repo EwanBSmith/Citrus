@@ -1,0 +1,46 @@
+<Window x:Class="Citrus.Desktop.HistoricalDataWindow" Style="{StaticResource {x:Type Window}}"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Historical data" Width="1100" Height="760" MinWidth="900" MinHeight="700" WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+ <Grid Margin="12">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="75"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <DockPanel Margin="0,0,0,12"><Label DockPanel.Dock="Left" Content="Local folder" Width="100"/><TextBox x:Name="folder" IsReadOnly="True" AutomationProperties.Name="Historical data folder"/></DockPanel>
+  <Grid x:Name="fields" Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/><ColumnDefinition Width="165"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <Grid.RowDefinitions><RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/></Grid.RowDefinitions>
+   <Label Content="Provider"/><ComboBox x:Name="provider" Grid.Column="1" Margin="3" SelectionChanged="ProviderChanged" AutomationProperties.Name="Provider"/>
+   <Label Grid.Column="2" Content="Alpaca feed"/><ComboBox x:Name="feed" Grid.Column="3" Margin="3" AutomationProperties.Name="Alpaca feed"/>
+   <Label Grid.Row="1" Content="Symbol"/><TextBox x:Name="symbol" Grid.Row="1" Grid.Column="1" Margin="3" AutomationProperties.Name="Symbol"/>
+   <Label Grid.Row="1" Grid.Column="2" Content="Venue"/><TextBox x:Name="venue" Grid.Row="1" Grid.Column="3" Margin="3" AutomationProperties.Name="Venue"/>
+   <Label Grid.Row="2" Content="Bar interval"/><ComboBox x:Name="interval" Grid.Row="2" Grid.Column="1" Margin="3" AutomationProperties.Name="Bar interval"/>
+   <Label Grid.Row="3" Content="Start date (UTC)"/><DatePicker x:Name="start" Grid.Row="3" Grid.Column="1" Margin="3" AutomationProperties.Name="Start date UTC"/>
+   <Label Grid.Row="3" Grid.Column="2" Content="End date (exclusive)"/><DatePicker x:Name="end" Grid.Row="3" Grid.Column="3" Margin="3" AutomationProperties.Name="End date UTC exclusive"/>
+  </Grid>
+  <WrapPanel Grid.Row="2" Margin="0,8">
+   <Button x:Name="downloadButton" Content="Download" Tag="Download" Click="CommandClicked"/>
+   <Button x:Name="cancel" Content="Cancel download" Tag="Cancel" Click="CommandClicked" IsEnabled="False"/>
+   <ProgressBar x:Name="progress" IsIndeterminate="True" Width="100" Height="18" Margin="8" Visibility="Collapsed"/>
+   <TextBlock VerticalAlignment="Center" Margin="8" Text="UTC midnight boundaries. Cached bars are reused; missing history is fetched."/>
+  </WrapPanel>
+  <DataGrid x:Name="grid" Grid.Row="3" SelectionMode="Single" AutoGenerateColumns="False" SelectionChanged="SelectionChanged" AutomationProperties.Name="Local historical datasets">
+   <DataGrid.Columns>
+    <DataGridTextColumn Header="File" Binding="{Binding File}" Width="150"/>
+    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="Auto"/>
+    <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="Auto"/>
+    <DataGridTextColumn Header="Instruments" Binding="{Binding Instruments}" Width="Auto"/>
+    <DataGridTextColumn Header="Interval" Binding="{Binding Interval}" Width="Auto"/>
+    <DataGridTextColumn Header="Bars" Binding="{Binding Bars}" Width="Auto"/>
+    <DataGridTextColumn Header="Bytes" Binding="{Binding Bytes}" Width="Auto"/>
+    <DataGridTextColumn Header="Start (UTC)" Binding="{Binding StartUtc, StringFormat=yyyy-MM-dd HH:mm}" Width="Auto"/>
+    <DataGridTextColumn Header="End (UTC)" Binding="{Binding EndUtc, StringFormat=yyyy-MM-dd HH:mm}" Width="Auto"/>
+   </DataGrid.Columns>
+  </DataGrid>
+  <TextBox x:Name="details" Grid.Row="4" Margin="0,8" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Dataset details"/>
+  <WrapPanel x:Name="actions" Grid.Row="5">
+   <Button Content="Refresh" Tag="Refresh" Click="CommandClicked"/>
+   <Button Content="Open folder" Tag="Open" Click="CommandClicked"/>
+   <Button Content="Export selected…" Tag="Export" Click="CommandClicked"/>
+   <Button Content="Delete selected…" Tag="Delete" Click="CommandClicked"/>
+  </WrapPanel>
+  <TextBlock x:Name="status" Grid.Row="6" Margin="3,8" Text="Ready" TextWrapping="Wrap"/>
+ </Grid>
+</Window>
