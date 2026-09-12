@@ -14,7 +14,33 @@ dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore
 
 The automated test executable returns a nonzero exit code on failure. It uses no external test packages or network calls. `dotnet test` is not the test entry point. Compilation uses Roslyn assemblies supplied with the SDK, copied into the application output. No package downloads are needed. The SDK is required to build; the .NET 10 runtime can run the built CLI.
 
-## Run the examples
+## Windows desktop workbench
+
+The initial GUI uses Windows Forms with native menus, a toolbar, a workspace tree, split panes, tabbed editors, sortable result tables, and an equity chart. The engine and CLI remain cross-platform; the desktop application requires Windows and the .NET 10 Desktop Runtime (included with the Windows SDK).
+
+```sh
+dotnet restore Citrus.Windows.slnx --configfile NuGet.Config
+dotnet build Citrus.Windows.slnx -c Release --no-restore
+dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
+```
+
+Choose **New example** to create a self-contained offline workspace in a new child folder, or **Open** an existing run JSON. Edit C# on the Strategy tab and the complete run JSON on Configuration. **Save all** (`Ctrl+S`) saves both documents; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports the same reports as the CLI. You can also pass a run JSON path as the application's first argument. Changes to the configured strategy path take effect on validation or execution, which loads that source into the editor after saving the previously displayed source to its original path.
+
+Configuration paths resolve relative to the run JSON. Set the tradable universe in the configuration editor; leave it blank to allow all dataset instruments.
+
+Overview reports portfolio performance and equity. Result tabs expose orders, fills, positions, costs, equity (including substrategy balances), and instrument attribution; click a column to sort or use `Ctrl+C` to copy selected rows. Tables show the first 5,000 records; **Results folder** opens the complete JSON/CSV exports. Runs replace matching report files. Prior results are cleared when a new run starts so a failed run cannot appear successful.
+
+This initial workbench edits configuration as JSON and source as plain text; it does not yet provide IntelliSense, a form-based configuration designer, saved-result import, or run cancellation. The window stays responsive during execution but must wait for the current operation before closing. Strategies remain trusted local code with normal process permissions.
+
+Windows-only offline integration and rendering checks:
+
+```sh
+dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke
+```
+
+The smoke check writes its outcome and layout PNGs to the specified folder, and returns a nonzero exit code on failure. `Citrus.slnx` remains the portable engine/CLI solution; `Citrus.Windows.slnx` adds the desktop application.
+
+## CLI examples
 
 ```sh
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/perpetual-data.json
@@ -28,20 +54,19 @@ Rerunning a backtest overwrites its result files in the configured output direct
 
 The perpetual example has a trend substrategy and a holding substrategy with 70/30 capital allocation. The equity example demonstrates next-session opening orders across a weekend and the US daylight-saving transition. Generated prices have zero funding and no corporate actions unless supplementary events are added.
 
-## Universe backtests
+## Tradable universe
 
-```sh
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/universe-run.json --universe examples/universe.json
+Backtests use the `data` MarketDataset path. Prepare datasets using `data generate`, `data download`, or `data import`. The separate universe file and `--universe` argument have been removed.
+
+Optionally restrict trading in the run JSON:
+
+```json
+"tradableUniverse": [
+  { "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "BTC" }
+]
 ```
 
-The universe JSON contains an `instruments` array of `{ "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "BTC" }` records. For equities use, for example, `{ "venue": "alpaca", "assetClass": "Equity", "symbol": "AAPL" }`. Instrument identities are case-sensitive and must match those used by the strategy. Equities route to Alpaca and linear perpetuals to Hyperliquid; a universe can contain both. Duplicate or empty universes fail validation. Strategies cannot submit orders outside this universe.
-
-Set `start`, `end` (UTC), `interval`, `cache`, `dataVersion`, and optionally Alpaca `feed` in the run JSON; omit `data`. Bars must open on or after `start` and close on or before `end`. Perpetual ranges must align to full UTC hourly/daily bars; equity bars follow regular exchange sessions. Ranges with no complete trading bars for a symbol fail explicitly. The universe argument resolves relative to the working directory; cache and other configuration paths resolve relative to the run JSON.
-
-Before simulation, Citrus checks each symbol's cached coverage and downloads only missing bar ranges, including the provider's associated funding/actions. Calendar responses are cached separately with their covered date ranges so holidays are distinguishable from missing calendar data. A fully cached run needs neither network access nor Alpaca credentials. Missing Alpaca data requires `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY`. Existing `data download` cache entries are reusable with matching cache path, feed, interval, instrument, and version; equities may initially need a calendar request. Local data here means the provider cache; arbitrary dataset files still use the existing `data` workflow.
-
-The resolved input, including the tradable universe, is saved as `universe-data.json` in the output directory and hashed in the manifest. To rerun from that snapshot, use a run configuration with `data` pointing to it and omit `--universe`. Missing provider history fails before the strategy starts. Provider limitations and the single-writer cache restriction below still apply. For corporate actions requiring a successor symbol, include that symbol in the universe.
-
+Omitting `tradableUniverse` (or setting it to `null`) permits all instruments present in the dataset. An empty array permits no trading. Explicit entries must be distinct and present in the dataset, using exact, case-sensitive identities. All dataset bars remain visible for signals and history, including instruments that cannot be traded. Orders outside the configured universe fail. The configuration, including this restriction, is retained in exported manifests.
 ## Strategies
 
 A source file defines exactly one concrete `IStrategy` with a public parameterless constructor. Specify extra assembly paths in the run configuration's `references` array, or after the source filename with `validate`.
@@ -77,7 +102,7 @@ context.Cancel(limitId);                                // cancel by returned or
 
 These calls illustrate alternatives, not a sequence to submit together. All buy/sell functions take a **positive quantity in instrument units**, allow fractional units, and return an order ID. Selling can reduce a long or establish/increase a short; buying can cover a short. Each call places an additional order and does not automatically cancel existing orders. The optional `timeInForce` defaults to `GoodTillCancelled`. They use the same validation, netting, fills, margin checks, and attribution as `Submit(new OrderRequest(...))`, which remains available for explicit signed-quantity requests. Equity opening/closing orders must be submitted before their execution event.
 
-Register substrategies during startup with positive capital weights summing to at most one; remaining cash stays unallocated. These weights allocate starting capital, not order sizes. The default resource limit is 1,000 substrategies and is configurable. When percentage targeting is useful, `Rebalance` remains available: its dictionary describes the complete target portfolio for that substrategy, and omitted holdings target zero. Targets use its current equity and completed prices, account for pending quantities, and submit market orders. Batch all desired symbols into one dictionary for a multi-symbol rebalance.
+Register substrategies during startup with positive capital weights summing to at most one; remaining cash stays unallocated. These weights allocate starting capital, not order sizes. A fixed limit of 100 substrategies is enforced in code and cannot be configured. When percentage targeting is useful, `Rebalance` remains available: its dictionary describes the complete target portfolio for that substrategy, and omitted holdings target zero. Targets use its current equity and completed prices, account for pending quantities, and submit market orders. Batch all desired symbols into one dictionary for a multi-symbol rebalance.
 
 Callbacks run sequentially. `History` exposes completed bars only and returns copies. `OnScheduled`, `OnOrderUpdate`, `OnFill`, and `OnStop` are optional. Schedules require future UTC times within the run to execute. Orders may be cancelled by ID. SMA and EMA return `null` until their warmup period is available. `Mode` exposes backtest/live context through the same contract; this release does not connect to a live trading venue.
 
@@ -123,7 +148,7 @@ Read [simulation rules](docs/simulation.md) and [requirement traceability](docs/
 
 When updating an existing strategy, replace `using Citrus.Contracts;` with `using Citrus.Trading;`. External projects must update their project/assembly reference to `Citrus.Trading` and rebuild. Consumers of `MarketDataset` or `Json` now import `Citrus.Data`, consumers of `SimulationOptions` import `Citrus.Simulation`, and consumers of `RunConfiguration` import `Citrus.Engine`. JSON formats and trading behaviour are unchanged. Previously captured strategy sources also need the import updated before recompilation; existing manifests retain their original hashes.
 
-Live adapters, optimisation/walk-forward, and GUI remain future releases.
+Live adapters and optimisation/walk-forward remain future releases. **Citrus.Desktop** provides the initial Windows GUI.
 
 Run benchmarks explicitly:
 

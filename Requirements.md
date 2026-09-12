@@ -16,7 +16,7 @@ The first release focuses on the backtesting engine and file-based C# strategy d
 
 A user writes a strategy as C# source code. A strategy may contain one or more substrategies and may operate across one or more symbols. The initial implementation may compile strategy source code before execution. Its strategy-facing interfaces shall not prevent interpreted C# execution from being added later.
 
-In a subsequent GUI release, a user can edit strategy scripts, start backtests, and analyse results through a graphical interface on Windows, macOS, or Linux.
+The initial GUI uses Windows Forms on Windows, styled as classic enterprise Windows software. A user can edit strategy scripts, configure and start backtests, and analyse results. The cross-platform requirement applies to the engine and CLI, not the GUI.
 
 ### 2.3 Backtesting
 
@@ -43,7 +43,7 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-PLAT-004** A strategy definition shall run in backtesting and live trading without modification, except for behaviour explicitly selected through runtime context.
 - **UR-PLAT-005** Citrus shall provide a graphical user interface for strategy creation.
 - **UR-PLAT-006** Citrus shall provide a command-line interface for deployment and execution.
-- **UR-PLAT-007** Citrus shall run on Windows, macOS, and Linux.
+- **UR-PLAT-007** The Citrus engine and CLI shall run on Windows, macOS, and Linux. The GUI is exempt from this requirement and shall initially use Windows Forms on Windows.
 
 ### 3.2 Release scope
 
@@ -76,9 +76,9 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-DATA-005** Citrus shall provide a geometric or arithmetic Brownian-motion data generator, as selected in the detailed design, for simulated prices.
 - **UR-DATA-006** Citrus shall initially support daily and hourly data intervals.
 - **UR-DATA-007** The market-data architecture shall permit additional data intervals to be added later.
-- **UR-DATA-008** Backtests shall accept a universe file argument defining the tradable instruments and check local coverage for every instrument over the configured dates and interval before simulation.
-- **UR-DATA-009** Missing historical coverage shall be downloaded from Alpaca for equities or Hyperliquid for perpetuals and stored locally for reuse. Unavailable coverage shall fail the run rather than shorten it silently.
-- **UR-DATA-010** Fully cached universe backtests shall run without provider network access, including reuse of cached equity calendar coverage.
+- **UR-DATA-008** Backtests shall read a MarketDataset and accept an optional tradableUniverse instrument list in the run configuration. Omitted or null permits all dataset instruments; an empty list permits no trades. Explicit entries must be distinct and present in the dataset. Strategies retain access to all dataset history but cannot place orders outside the tradable universe.
+- **UR-DATA-009** Data download commands shall cache historical coverage from Alpaca for equities or Hyperliquid for perpetuals for reuse. Unavailable coverage shall fail rather than shorten it silently.
+- **UR-DATA-010** Backtests using prepared market datasets shall run without provider network access.
 
 ### 3.5 Backtesting and results
 
@@ -115,7 +115,7 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-STRAT-003** Strategy scripts shall be able to ingest data from third-party APIs.
 - **UR-STRAT-004** Strategy scripts shall be able to conditionally execute code according to whether the runtime is backtesting or live trading.
 - **UR-STRAT-005** Strategy scripts shall have access to a library of technical indicators, initially including moving averages.
-- **UR-STRAT-006** A strategy shall support any number of substrategies, subject to configured system resource limits.
+- **UR-STRAT-006** A strategy shall support up to 100 substrategies, enforced by a fixed code limit that is not configurable.
 - **UR-STRAT-007** Citrus shall net the individual orders produced by substrategies in both backtesting and live trading according to one defined and consistent netting model.
 
 ### 3.10 Verification

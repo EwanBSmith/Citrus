@@ -12,12 +12,6 @@ public static class DatasetValidator
     {
         if (data.SchemaVersion != 1 || data.Interval.Minutes <= 0 || data.Bars.Count == 0)
             throw new InvalidDataException("Dataset requires schemaVersion 1, a positive interval, and bars.");
-        if (data.Universe.Count > 0)
-        {
-            new TradingUniverse { Instruments = data.Universe }.Validate();
-            if (data.Universe.Any(i => !data.Bars.Any(b => b.Instrument == i)) || data.Bars.Any(b => !data.Universe.Contains(b.Instrument)))
-                throw new InvalidDataException("Dataset bars must match its explicit tradable universe.");
-        }
         DateTimeOffset? sessionClose = null;
         foreach (var session in data.Sessions)
         {

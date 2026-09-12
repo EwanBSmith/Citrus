@@ -14,18 +14,8 @@ public sealed record RunConfiguration
     public string[] References { get; init; } = [];
     /// <summary>Gets the market dataset path, resolved relative to the run configuration by the CLI.</summary>
     public string Data { get; init; } = "";
-    /// <summary>Gets the inclusive UTC start for universe-driven data preparation.</summary>
-    public DateTimeOffset? Start { get; init; }
-    /// <summary>Gets the exclusive UTC bar-open limit; only bars closing by this time are included.</summary>
-    public DateTimeOffset? End { get; init; }
-    /// <summary>Gets the requested provider bar interval.</summary>
-    public BarInterval Interval { get; init; } = BarInterval.Daily;
-    /// <summary>Gets the provider cache directory relative to the run configuration.</summary>
-    public string Cache { get; init; } = ".cache";
-    /// <summary>Gets the explicit historical revision used to partition the cache.</summary>
-    public string DataVersion { get; init; } = "1";
-    /// <summary>Gets the Alpaca market data feed.</summary>
-    public string Feed { get; init; } = "iex";
+    /// <summary>Gets the permitted instruments; null allows all dataset instruments, while an empty list permits no trading.</summary>
+    public List<Instrument>? TradableUniverse { get; init; }
     /// <summary>Gets the results directory, resolved relative to the run configuration by the CLI.</summary>
     public string Output { get; init; } = "results";
     /// <summary>Gets starting portfolio cash, including capital not allocated to a substrategy.</summary>
@@ -34,8 +24,6 @@ public sealed record RunConfiguration
     public int Seed { get; init; } = 42;
     /// <summary>Gets the annual fractional risk-free rate used in reported Sharpe calculations.</summary>
     public decimal RiskFreeRate { get; init; }
-    /// <summary>Gets the maximum number of substrategies that may register during startup.</summary>
-    public int MaximumSubstrategies { get; init; } = 1000;
     /// <summary>Gets execution and accounting settings for the simulated venue.</summary>
     public SimulationOptions Simulation { get; init; } = new();
 }

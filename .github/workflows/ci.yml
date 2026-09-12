@@ -18,3 +18,9 @@ jobs:
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/perpetual-run.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/equity-data.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/equity-run.json
+      - if: runner.os == 'Windows'
+        run: dotnet restore Citrus.Windows.slnx --configfile NuGet.Config
+      - if: runner.os == 'Windows'
+        run: dotnet build Citrus.Windows.slnx -c Release --no-restore
+      - if: runner.os == 'Windows'
+        run: dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke

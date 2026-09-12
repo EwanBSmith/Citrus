@@ -15,6 +15,7 @@ public sealed record BacktestResult(IReadOnlyList<OrderUpdate> Orders, IReadOnly
 /// <summary>Runs a sequential event simulation over validated market data with deterministic event ordering.</summary>
 public sealed class BacktestEngine
 {
+    private const int MaximumSubstrategies = 100;
     /// <summary>Validates inputs and runs a trusted strategy to completion; mode only labels the strategy context.</summary>
     public BacktestResult Run(IStrategy strategy, MarketDataset data, RunConfiguration configuration,
         ExecutionMode mode = ExecutionMode.Backtest)
@@ -24,13 +25,19 @@ public sealed class BacktestEngine
             if (!data.Bars.Any(b => b.Instrument == action.Successor && b.CloseTime >= action.Time))
                 throw new InvalidDataException($"Corporate action {action.Id} requires successor price history; merge a supplementary dataset.");
         configuration.Simulation.Validate();
-        if (configuration.SchemaVersion != 1 || configuration.InitialCash <= 0 || configuration.MaximumSubstrategies <= 0)
+        if (configuration.SchemaVersion != 1 || configuration.InitialCash <= 0)
             throw new ArgumentException("Invalid run configuration.");
         foreach (var group in data.Bars.GroupBy(b => b.Instrument))
             DatasetValidator.RequireCoverage(data, group.Key, group.Min(b => b.OpenTime), group.Max(b => b.CloseTime));
+        var available = data.Bars.Select(b => b.Instrument).ToHashSet();
+        var permitted = configuration.TradableUniverse;
+        if (permitted is not null && (permitted.Distinct().Count() != permitted.Count ||
+            permitted.Any(i => i is null || !available.Contains(i))))
+            throw new ArgumentException("Tradable universe must contain distinct instruments present in the market dataset.");
+        var universe = permitted is null ? available : permitted.ToHashSet();
         var ledger = new Ledger(configuration.InitialCash);
         var book = new OrderBook(ledger, configuration.Simulation, configuration.Seed);
-        var context = new Context(ledger, book, configuration.MaximumSubstrategies, mode, data.Universe.ToHashSet());
+        var context = new Context(ledger, book, mode, universe);
         var opens = data.Bars.GroupBy(b => b.OpenTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var closes = data.Bars.GroupBy(b => b.CloseTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var actions = data.CorporateActions.GroupBy(a => a.Time).ToDictionary(g => g.Key, g => g.OrderBy(a => a.Id, StringComparer.Ordinal).ToArray());
@@ -106,7 +113,7 @@ public sealed class BacktestEngine
     }
 
     /// <summary>Implements strategy operations against the ledger and order book while retaining completed history.</summary>
-    private sealed class Context(Ledger ledger, OrderBook book, int maximumSubstrategies, ExecutionMode mode, HashSet<Instrument> universe) : IStrategyContext
+    private sealed class Context(Ledger ledger, OrderBook book, ExecutionMode mode, HashSet<Instrument> universe) : IStrategyContext
     {
         private readonly Dictionary<Instrument, List<Bar>> history = [];
         public readonly SortedDictionary<DateTimeOffset, List<string>> Scheduled = [];
@@ -118,10 +125,11 @@ public sealed class BacktestEngine
         public PortfolioSnapshot Portfolio => ledger.Snapshot(Time);
         public IReadOnlyList<OrderUpdate> OpenOrders => book.Pending.Select(o => new OrderUpdate(o.Id,
             o.Request with { Quantity = o.Remaining }, OrderStatus.Accepted, o.Submitted)).ToArray();
-        /// <summary>Registers initial capital allocation only during startup and within the configured account limit.</summary>
+        /// <summary>Registers initial capital allocation during startup, up to the fixed limit of 100 substrategies.</summary>
         public void Register(string substrategy, decimal capitalWeight)
         {
-            if (Started || ledger.Count >= maximumSubstrategies) throw new InvalidOperationException("Register substrategies during startup within the configured limit.");
+            if (Started) throw new InvalidOperationException("Register substrategies during startup.");
+            if (ledger.Count >= MaximumSubstrategies) throw new InvalidOperationException("A strategy may register at most 100 substrategies.");
             ledger.Register(substrategy, capitalWeight);
         }
         /// <summary>Returns a copy of up to count completed bars for an instrument, rejecting negative counts.</summary>
@@ -140,7 +148,7 @@ public sealed class BacktestEngine
         public long Submit(OrderRequest order)
         {
             if (Stopping) throw new InvalidOperationException("Run is stopping.");
-            if (universe.Count > 0 && !universe.Contains(order.Instrument))
+            if (!universe.Contains(order.Instrument))
                 throw new ArgumentException($"Instrument {order.Instrument.Key} is outside the tradable universe.");
             return book.Submit(order, Time);
         }

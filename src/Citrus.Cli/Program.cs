@@ -10,7 +10,7 @@ try
         Console.WriteLine("""
         Citrus: deterministic backtesting with trusted C# strategies
           validate <strategy.cs> [reference.dll ...]
-          backtest <run.json> [--universe <universe.json>]
+          backtest <run.json>
           data generate <generation.json> <output.json>
           data import <dataset.json> <output.json> [supplement.json ...]
           data download <download.json> <output.json>
@@ -23,7 +23,7 @@ try
         using var compiled = CompiledStrategy.Load(args[1], args.Skip(2));
         Console.WriteLine($"Valid strategy: {compiled.Strategy.GetType().Name}"); return 0;
     }
-    if (args[0] == "backtest" && (args.Length == 2 || args.Length == 4 && args[2] == "--universe"))
+    if (args[0] == "backtest" && args.Length == 2)
     {
         var configPath = Path.GetFullPath(args[1]);
         var root = Path.GetDirectoryName(configPath)!;
@@ -31,26 +31,9 @@ try
         string Resolve(string path) => Path.GetFullPath(path, root);
         var config = Json.Read<RunConfiguration>(configPath);
         var strategy = Resolve(config.Strategy); var output = Resolve(config.Output);
-        string dataPath;
-        MarketDataset data;
-        if (args.Length == 4)
-        {
-            if (!string.IsNullOrWhiteSpace(config.Data)) throw new ArgumentException("Use either data in the run configuration or --universe, not both.");
-            var start = config.Start ?? throw new ArgumentException("Universe backtests require start in the run configuration.");
-            var end = config.End ?? throw new ArgumentException("Universe backtests require end in the run configuration.");
-            var universe = Json.Read<TradingUniverse>(Path.GetFullPath(args[3]));
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
-            Console.WriteLine("Checking local universe coverage and downloading missing history...");
-            data = await new UniverseData(http, Resolve(config.Cache)).LoadAsync(universe, start, end, config.Interval, config.DataVersion, config.Feed);
-            Directory.CreateDirectory(output);
-            dataPath = Path.Combine(output, "universe-data.json");
-            Json.Write(dataPath, data);
-        }
-        else
-        {
-            dataPath = Resolve(config.Data);
-            data = Json.Read<MarketDataset>(dataPath);
-        }
+        if (string.IsNullOrWhiteSpace(config.Data)) throw new ArgumentException("A market dataset path is required.");
+        var dataPath = Resolve(config.Data);
+        var data = Json.Read<MarketDataset>(dataPath);
         using var compiled = CompiledStrategy.Load(strategy, config.References.Select(Resolve));
         var result = new BacktestEngine().Run(compiled.Strategy, data, config);
         Reports.Export(output, result, config, data, strategy, dataPath, compiled.DependencyHashes);

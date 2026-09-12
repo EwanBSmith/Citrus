@@ -29,73 +29,65 @@ BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOpt
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
-Test("Universe downloads both symbols, reuses cache, and fetches only extension", () =>
+Test("Substrategy registration permits 100 accounts and rejects the 101st", () =>
 {
-    var requests = new List<(string Symbol, long Start, long End)>();
-    using var http = new HttpClient(new ResponseHandler(message =>
+    var result = Run(new CallbackStrategy(weight: 0.001m, onStart: c =>
     {
-        using var body = JsonDocument.Parse(message.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
-        var root = body.RootElement; string response;
-        if (root.GetProperty("type").GetString() == "candleSnapshot")
-        {
-            var req = root.GetProperty("req"); var first = req.GetProperty("startTime").GetInt64(); var last = req.GetProperty("endTime").GetInt64();
-            requests.Add((req.GetProperty("coin").GetString()!, first, last));
-            response = JsonSerializer.Serialize(Enumerable.Range(0, 3).Select(i => start.AddHours(i).ToUnixTimeMilliseconds())
-                .Where(t => t >= first && t <= last).Select(t => new { t, o = "100", h = "105", l = "95", c = "101", v = "10" }));
-        }
-        else
-        {
-            var first = root.GetProperty("startTime").GetInt64(); var last = root.GetProperty("endTime").GetInt64();
-            response = JsonSerializer.Serialize(Enumerable.Range(1, 3).Select(i => start.AddHours(i).ToUnixTimeMilliseconds())
-                .Where(t => t >= first && t <= last).Select(time => new { time, fundingRate = "0.001" }));
-        }
-        return new(HttpStatusCode.OK) { Content = new StringContent(response) };
+        for (var i = 1; i < 100; i++) c.Register($"s{i}", 0.001m);
+        Throws<InvalidOperationException>(() => c.Register("overflow", 0.001m));
     }));
-    var universe = new TradingUniverse { Instruments = [instrument, instrument with { Symbol = "ETH" }] };
-    var loader = new UniverseData(http, Temporary());
-    var first = loader.LoadAsync(universe, start, start.AddHours(2), BarInterval.Hourly).GetAwaiter().GetResult();
-    Equal(4, first.Bars.Count); Equal(2, first.Universe.Count); Equal(2, requests.Count);
-    var second = loader.LoadAsync(universe, start, start.AddHours(2), BarInterval.Hourly).GetAwaiter().GetResult();
-    Equal(JsonSerializer.Serialize(first, Json.Options), JsonSerializer.Serialize(second, Json.Options)); Equal(2, requests.Count);
-    var extended = loader.LoadAsync(universe, start, start.AddHours(3), BarInterval.Hourly).GetAwaiter().GetResult();
-    Equal(6, extended.Bars.Count); Equal(4, requests.Count);
-    True(requests.Skip(2).All(r => r.Start == start.AddHours(2).ToUnixTimeMilliseconds()));
-    var subset = loader.LoadAsync(new() { Instruments = [instrument] }, start.AddHours(1), start.AddHours(2), BarInterval.Hourly).GetAwaiter().GetResult();
-    Equal(1, subset.Bars.Count); Equal(4, requests.Count);
+    Equal(100, result.Equity.First().Substrategies.Count);
 });
-Test("Universe rejects invalid inputs and unavailable history", () =>
+Test("Substrategy limit is not a configuration setting", () =>
 {
-    using var http = new HttpClient(new ResponseHandler(_ => new(HttpStatusCode.OK) { Content = new StringContent("[]") }));
-    var loader = new UniverseData(http, Temporary()); var universe = new TradingUniverse { Instruments = [instrument] };
-    Throws<ArgumentException>(() => new TradingUniverse().Validate());
-    Throws<ArgumentException>(() => new TradingUniverse { Instruments = [instrument, instrument] }.Validate());
-    Throws<ArgumentException>(() => loader.LoadAsync(universe, start, start, BarInterval.Hourly).GetAwaiter().GetResult());
-    Throws<ArgumentException>(() => loader.LoadAsync(universe, start.AddMinutes(1), start.AddHours(1), BarInterval.Hourly).GetAwaiter().GetResult());
-    Throws<InvalidDataException>(() => loader.LoadAsync(universe, start, start.AddHours(1), BarInterval.Hourly).GetAwaiter().GetResult());
+    Throws<JsonException>(() => JsonSerializer.Deserialize<RunConfiguration>("{\"maximumSubstrategies\":200}", Json.Options));
+    True(!JsonSerializer.Serialize(Config(), Json.Options).Contains("maximumSubstrategies", StringComparison.OrdinalIgnoreCase));
 });
-Test("Universe equity cache works offline with cached calendar and no authentication", () =>
+Test("Tradable universe persists and restricts orders while retaining signal data", () =>
 {
-    var directory = Temporary();
-    var equityInstrument = new Instrument("alpaca", AssetClass.Equity, "AAPL");
-    var session = new MarketSession(start.AddHours(14), start.AddHours(15));
-    var data = Data(100) with { Bars = [new(equityInstrument, session.Open, session.Close, 100, 105, 95, 101, 10, true, true)], Sessions = [session] };
-    var cache = new DataCache(directory);
-    cache.GetAsync(new NamedFixtureProvider(data, "alpaca-iex"), new(equityInstrument, BarInterval.Hourly, session.Open, session.Close), data.Sessions).GetAwaiter().GetResult();
-    Json.Write(Path.Combine(directory, "alpaca-calendar.json"), new[] { new UniverseData.CalendarCoverage(new(2024, 1, 1), new(2024, 1, 3), [session]) });
-    using var http = new HttpClient(new ResponseHandler(_ => throw new Exception("Cache hit must not use HTTP")));
-    var loaded = new UniverseData(http, directory).LoadAsync(new() { Instruments = [equityInstrument] }, start, start.AddDays(1), BarInterval.Hourly).GetAwaiter().GetResult();
-    Equal(1, loaded.Bars.Count); Equal(equityInstrument, loaded.Universe.Single());
-    Throws<InvalidDataException>(() => new UniverseData(http, directory).LoadAsync(new() { Instruments = [equityInstrument] }, start.AddDays(1), start.AddDays(2), BarInterval.Hourly).GetAwaiter().GetResult());
+    var other = instrument with { Symbol = "ETH" };
+    var data = Data(100, 110);
+    data = data with { Bars = data.Bars.Concat(data.Bars.Select(b => b with { Instrument = other })).OrderBy(b => b.OpenTime).ToList() };
+    var config = Config() with { TradableUniverse = [instrument] };
+    var path = Path.Combine(Temporary(), "run.json"); Json.Write(path, config);
+    var restored = Json.Read<RunConfiguration>(path);
+    Equal(instrument, restored.TradableUniverse!.Single());
+    var observedOther = false;
+    var result = new BacktestEngine().Run(new CallbackStrategy(
+        onStart: c => c.Buy("a", instrument, 1),
+        onBar: (c, bars) =>
+        {
+            observedOther |= bars.Any(b => b.Instrument == other);
+            True(c.History(other, 10).Count > 0);
+            Throws<ArgumentException>(() => c.Buy("a", other, 1));
+        }), data, restored);
+    Equal(1, result.Fills.Count); True(observedOther);
+    Equal(1, new BacktestEngine().Run(new CallbackStrategy(onStart: c => c.Buy("a", other, 1)), data, Config()).Fills.Count);
 });
-Test("Universe survives serialization and prevents out-of-universe orders", () =>
+Test("Tradable universe rejects duplicates and absent instruments before startup", () =>
 {
-    var data = Data(100, 110) with { Universe = [instrument] };
-    var path = Path.Combine(Temporary(), "dataset.json"); Json.Write(path, data);
-    var restored = Json.Read<MarketDataset>(path);
-    Throws<ArgumentException>(() => Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument with { Symbol = "ETH" }, 1))), restored));
-    Equal(1, Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 1))), restored).Fills.Count);
+    foreach (var entries in new List<Instrument>[] { [instrument, instrument], [instrument with { Symbol = "MISSING" }], [null!] })
+    {
+        var started = false;
+        Throws<ArgumentException>(() => new BacktestEngine().Run(new CallbackStrategy(onStart: c => started = true),
+            Data(100, 110), Config() with { TradableUniverse = entries }));
+        True(!started);
+    }
 });
-
+Test("Empty tradable universe permits observations but no orders", () =>
+{
+    var barsSeen = 0;
+    var result = new BacktestEngine().Run(new CallbackStrategy(onBar: (c, bars) =>
+    {
+        barsSeen += bars.Count;
+        Throws<ArgumentException>(() => c.Buy("a", instrument, 1));
+    }), Data(100, 110), Config() with { TradableUniverse = [] });
+    Equal(2, barsSeen); Equal(0, result.Fills.Count);
+});
+Test("Default tradable universe rejects orders absent from the dataset", () =>
+{
+    Throws<ArgumentException>(() => Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument with { Symbol = "MISSING" }, 1))));
+});
 Test("Market decisions see only completed bars and fill next open", () =>
 {
     var strategy = new CallbackStrategy(onBar: (c, b) => { Equal(b[^1].CloseTime, c.Time); True(c.History(instrument, 100).All(x => x.CloseTime <= c.Time)); if (c.History(instrument, 100).Count == 1) c.Submit(new("a", instrument, 1)); });

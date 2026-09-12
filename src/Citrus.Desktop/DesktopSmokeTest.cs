@@ -1,0 +1,122 @@
+using Citrus.Data;
+using Citrus.Engine;
+
+namespace Citrus.Desktop;
+
+/// <summary>Runs offline desktop integration checks and captures native-control layouts on Windows.</summary>
+internal static class DesktopSmokeTest
+{
+    /// <summary>Verifies example execution, replay, strict configuration parsing, errors, result binding, and form rendering.</summary>
+    internal static int Run(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = BacktestWorkspace.CreateExample(directory);
+            var config = Json.Read<RunConfiguration>(path);
+            var first = BacktestWorkspace.RunAsync(path, config).GetAwaiter().GetResult();
+            if (first.Result.Fills.Count != 1 || first.Result.Equity.Count < 365)
+                throw new InvalidOperationException("Example did not execute the expected holding strategy.");
+            var equityPath = Path.Combine(first.Output, "equity.csv");
+            var before = File.ReadAllText(equityPath);
+            File.WriteAllText(Path.Combine(first.Output, "retain.txt"), "Keep unrelated output files");
+            BacktestWorkspace.RunAsync(path, config).GetAwaiter().GetResult();
+            if (before != File.ReadAllText(equityPath) || !File.Exists(Path.Combine(first.Output, "retain.txt")))
+                throw new InvalidOperationException("Replay or output preservation failed.");
+            ExpectFailure(() => BacktestWorkspace.Parse("{\"unknownSetting\":1}"));
+            ExpectFailure(() => BacktestWorkspace.RunAsync(path, config with { Data = "missing.json" }).GetAwaiter().GetResult());
+            ExpectFailure(() => BacktestWorkspace.RunAsync(path, config with { Data = "" }).GetAwaiter().GetResult());
+            using var form = new MainForm();
+            form.LoadConfiguration(path);
+            form.Present(first);
+            Capture(form, Path.Combine(directory, "desktop-overview.png"), new Size(1280, 850));
+            Capture(form, Path.Combine(directory, "desktop-compact.png"), new Size(900, 620));
+            var controls = Descendants(form).ToArray();
+            var editors = controls.OfType<RichTextBox>().ToArray();
+            var tabs = controls.OfType<TabControl>().Single();
+            tabs.SelectedIndex = 0;
+            Application.DoEvents();
+            editors.Single(e => e.AccessibleName == "C# strategy source").AppendText("\n// Desktop save verification\n");
+            tabs.SelectedIndex = 1;
+            Application.DoEvents();
+            var configEditor = controls.OfType<ConfigurationEditor>().Single();
+            if (System.Text.Json.JsonSerializer.Serialize(configEditor.ReadConfiguration(), Json.Options) != System.Text.Json.JsonSerializer.Serialize(config, Json.Options))
+                throw new InvalidOperationException("Configuration controls changed untouched settings.");
+            var universeInput = controls.OfType<TextBox>().Single(e => e.AccessibleName == "Tradable universe (JSON; blank = all)");
+            universeInput.Text = "[]";
+            if (configEditor.ReadConfiguration().TradableUniverse is not { Count: 0 })
+                throw new InvalidOperationException("Empty tradable universe was not preserved.");
+            var instruments = Json.Read<MarketDataset>(BacktestWorkspace.Resolve(path, config.Data)).Bars.Select(b => b.Instrument).Distinct().ToList();
+            universeInput.Text = System.Text.Json.JsonSerializer.Serialize(instruments, Json.Options);
+            if (!configEditor.ReadConfiguration().TradableUniverse!.SequenceEqual(instruments))
+                throw new InvalidOperationException("Configured tradable universe was not preserved.");
+            universeInput.Clear();
+            if (configEditor.ReadConfiguration().TradableUniverse is not null)
+                throw new InvalidOperationException("Blank tradable universe did not restore the default.");
+            controls.OfType<NumericUpDown>().Single(e => e.AccessibleName == "Initial Cash").Value = 125000;
+            var spread = controls.OfType<NumericUpDown>().Single(e => e.AccessibleName == "Spread (basis points)");
+            spread.Value = 2;
+            if (configEditor.ReadConfiguration().Simulation.SpreadBps != 2)
+                throw new InvalidOperationException("Simulation control changes were not captured.");
+            spread.Value = config.Simulation.SpreadBps;
+            var pending = form.RunAsync();
+            var timeout = System.Diagnostics.Stopwatch.StartNew();
+            while (!pending.IsCompleted)
+            {
+                if (timeout.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Desktop background run did not complete.");
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            pending.GetAwaiter().GetResult();
+            if (Json.Read<RunConfiguration>(path).InitialCash != 125000) throw new InvalidOperationException("Configuration changes were not saved.");
+            if (!File.ReadAllText(BacktestWorkspace.Resolve(path, config.Strategy)).Contains("Desktop save verification"))
+                throw new InvalidOperationException("Source changes were not saved.");
+            if (before == File.ReadAllText(equityPath)) throw new InvalidOperationException("Updated capital did not change exports.");
+            if (editors.Any(e => e.ReadOnly)) throw new InvalidOperationException("Editors remained read-only after completion.");
+            foreach (var (index, name) in new[] { (0, "strategy"), (1, "configuration"), (4, "fills") })
+            {
+                tabs.SelectedIndex = index;
+                Capture(form, Path.Combine(directory, "desktop-" + name + ".png"), new Size(1280, 850));
+                if (index == 1) Capture(form, Path.Combine(directory, "desktop-configuration-compact.png"), new Size(900, 620));
+            }
+            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: example, exports, deterministic replay, preserved files, strict JSON, missing data, conflicting data mode, result binding, native form rendering, document saves, background UI run, controls restored after completion.");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), exception.ToString());
+            return 1;
+        }
+    }
+
+    /// <summary>Requires an invalid desktop input to fail instead of continuing silently.</summary>
+    private static void ExpectFailure(Action action)
+    {
+        try { action(); } catch { return; }
+        throw new InvalidOperationException("Invalid input unexpectedly succeeded.");
+    }
+
+    /// <summary>Enumerates native descendants so integration checks can edit documents and select tabs.</summary>
+    private static IEnumerable<Control> Descendants(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            yield return child;
+            foreach (var descendant in Descendants(child)) yield return descendant;
+        }
+    }
+
+    /// <summary>Renders the form without opening an interactive window.</summary>
+    private static void Capture(Form form, string path, Size size)
+    {
+        form.Size = size;
+        form.ShowInTaskbar = false;
+        form.Opacity = 0;
+        form.Show();
+        Application.DoEvents();
+        form.PerformLayout();
+        using var bitmap = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
+        bitmap.Save(path);
+    }
+}

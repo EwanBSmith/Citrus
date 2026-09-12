@@ -11,12 +11,14 @@ The source requirements remain unchanged. This table maps first-release requirem
 | UR-DATA-003 | Versioned coverage cache with atomic file replacement | Missing-range and cache reuse tests |
 | UR-DATA-004 | Explicit split/dividend/merger/symbol-change/delisting events | Corporate-action tests, successor aggregation and unresolved-event rejection |
 | UR-DATA-005–007 | Seeded geometric Brownian OHLC generator; extensible interval record | Deterministic generation and OHLC validation tests |
+| UR-DATA-008–010 | Dataset-based runs with optional configured tradable universe; separate cached data downloads | Universe validation, permitted/forbidden orders, signal history, empty/default settings and cache reuse tests |
 | UR-BT-001–003, 005/006; UR-STRAT-006/007 | Registered substrategies, full instrument identity, compatible netting, virtual ledgers and exports | Crossing, residual rejection, attribution, reconciliation and exports tests |
 | UR-EQ-001–005 | Market, limit, opening, closing, and equity shorts | Timing, gap fills, session/DST/holiday, limit, short-availability tests |
 | UR-STRAT-001–003/005 | C# API, rebalance helper, per-run external-data cache, SMA/EMA | Pending-aware rebalance, external-data cache and indicator tests |
 | UR-TEST-001 | Dependency-free automated unit/integration executable | `dotnet run --project tests/Citrus.Tests` |
-| UR-SCOPE-002–007; UR-OPT-001/002 | Planned optimisation, walk-forward, GUI editing/execution/analysis | Deferred; no implementation claim |
-| UR-PLAT-002/005; UR-BRK-001/002; UR-LIVE-001–003 | Live execution and GUI remain later releases | Deferred; only market-data connections implemented |
+| UR-PLAT-005/007; UR-SCOPE-004–007 | Windows-only WinForms workbench: C# and run JSON editing, background backtests, equity chart and result tables | Windows desktop smoke check: offline example, replay/export, invalid inputs, result binding, native form rendering |
+| UR-SCOPE-002/003; UR-OPT-001/002 | Planned optimisation and walk-forward | Deferred; no implementation claim |
+| UR-PLAT-002; UR-BRK-001/002; UR-LIVE-001–003 | Live execution remains a later release | Deferred; only market-data connections implemented |
 
 ## Acceptance evidence and limits
 

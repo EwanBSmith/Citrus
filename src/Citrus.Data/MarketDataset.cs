@@ -5,8 +5,6 @@ namespace Citrus.Data;
 /// <summary>Contains normalized bars, explicit sessions, supplementary events, and provenance for a single interval.</summary>
 public sealed record MarketDataset
 {
-    /// <summary>Gets the explicit tradable universe; an empty list preserves legacy dataset behavior.</summary>
-    public List<Instrument> Universe { get; init; } = [];
     /// <summary>Gets the serialized format version; the current supported version is one.</summary>
     public int SchemaVersion { get; init; } = 1;
     /// <summary>Gets the source identifier used for provenance.</summary>
