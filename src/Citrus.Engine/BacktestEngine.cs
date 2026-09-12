@@ -7,17 +7,17 @@ namespace Citrus.Engine;
 /// <summary>Records portfolio and substrategy valuation at one simulation observation time.</summary>
 public sealed record EquityPoint(DateTimeOffset Time, decimal Cash, decimal Equity, decimal GrossExposure,
     IReadOnlyDictionary<string, decimal> Substrategies);
-/// <summary>Collects completed-run execution history, valuations, captured external inputs, and final attribution.</summary>
+/// <summary>Collects completed-run execution history, valuations, and final attribution.</summary>
 public sealed record BacktestResult(IReadOnlyList<OrderUpdate> Orders, IReadOnlyList<Fill> Fills,
     IReadOnlyList<CashMovement> Costs, IReadOnlyList<EquityPoint> Equity, PortfolioSnapshot Final,
-    IReadOnlyDictionary<string, byte[]> ExternalSnapshots, IReadOnlyList<InstrumentAttribution> Attribution);
+    IReadOnlyList<InstrumentAttribution> Attribution);
 
 /// <summary>Runs a sequential event simulation over validated market data with deterministic event ordering.</summary>
 public sealed class BacktestEngine
 {
-    /// <summary>Validates inputs and runs a trusted strategy to completion; supplied snapshots enable replay, and mode only labels the strategy context.</summary>
+    /// <summary>Validates inputs and runs a trusted strategy to completion; mode only labels the strategy context.</summary>
     public BacktestResult Run(IStrategy strategy, MarketDataset data, RunConfiguration configuration,
-        ExecutionMode mode = ExecutionMode.Backtest, IReadOnlyDictionary<string, byte[]>? snapshots = null)
+        ExecutionMode mode = ExecutionMode.Backtest)
     {
         DatasetValidator.Validate(data);
         foreach (var action in data.CorporateActions.Where(a => a.Successor is not null))
@@ -30,7 +30,7 @@ public sealed class BacktestEngine
             DatasetValidator.RequireCoverage(data, group.Key, group.Min(b => b.OpenTime), group.Max(b => b.CloseTime));
         var ledger = new Ledger(configuration.InitialCash);
         var book = new OrderBook(ledger, configuration.Simulation, configuration.Seed);
-        var context = new Context(ledger, book, configuration.MaximumSubstrategies, mode, snapshots);
+        var context = new Context(ledger, book, configuration.MaximumSubstrategies, mode);
         var opens = data.Bars.GroupBy(b => b.OpenTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var closes = data.Bars.GroupBy(b => b.CloseTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var actions = data.CorporateActions.GroupBy(a => a.Time).ToDictionary(g => g.Key, g => g.OrderBy(a => a.Id, StringComparer.Ordinal).ToArray());
@@ -102,16 +102,15 @@ public sealed class BacktestEngine
             Dispatch(); strategy.OnStop(context);
         }
         ledger.Reconcile(context.Time);
-        return new(book.Updates, book.Fills, ledger.Movements, points, ledger.Snapshot(context.Time), context.Snapshots, ledger.Attribution());
+        return new(book.Updates, book.Fills, ledger.Movements, points, ledger.Snapshot(context.Time), ledger.Attribution());
     }
 
-    /// <summary>Implements strategy operations against the ledger and order book while retaining completed history and replay state.</summary>
-    private sealed class Context(Ledger ledger, OrderBook book, int maximumSubstrategies, ExecutionMode mode,
-        IReadOnlyDictionary<string, byte[]>? snapshots) : IStrategyContext
+    /// <summary>Implements strategy operations against the ledger and order book while retaining completed history.</summary>
+    private sealed class Context(Ledger ledger, OrderBook book, int maximumSubstrategies, ExecutionMode mode) : IStrategyContext
     {
         private readonly Dictionary<Instrument, List<Bar>> history = [];
         public readonly SortedDictionary<DateTimeOffset, List<string>> Scheduled = [];
-        public readonly Dictionary<string, byte[]> Snapshots = snapshots?.ToDictionary(p => p.Key, p => p.Value.ToArray()) ?? [];
+        private readonly Dictionary<string, byte[]> externalData = [];
         public bool Started;
         public bool Stopping;
         public ExecutionMode Mode => mode;
@@ -164,15 +163,11 @@ public sealed class BacktestEngine
             if (!Scheduled.TryGetValue(time, out var names)) Scheduled.Add(time, names = []);
             names.Add(name);
         }
-        /// <summary>Returns a defensive copy of captured bytes, fetching once in capture mode and failing on missing replay keys.</summary>
+        /// <summary>Fetches bytes once per key during a run and returns a defensive copy.</summary>
         public byte[] ExternalData(string key, Func<byte[]> fetch)
         {
-            if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("Snapshot key required.");
-            if (!Snapshots.TryGetValue(key, out var data))
-            {
-                if (snapshots is not null) throw new InvalidDataException($"Missing replay snapshot: {key}");
-                Snapshots.Add(key, data = fetch().ToArray());
-            }
+            if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("External data key required.");
+            if (!externalData.TryGetValue(key, out var data)) externalData.Add(key, data = fetch().ToArray());
             return data.ToArray();
         }
     }

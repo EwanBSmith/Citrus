@@ -16,7 +16,5 @@ jobs:
       - run: dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/perpetual-data.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/perpetual-run.json
-      - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest artifacts/perpetual-result/inputs/run.json
-      - run: dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore -- --compare artifacts/perpetual-result artifacts/perpetual-result/replay
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/equity-data.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/equity-run.json

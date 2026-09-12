@@ -13,13 +13,13 @@ The source requirements remain unchanged. This table maps first-release requirem
 | UR-DATA-005–007 | Seeded geometric Brownian OHLC generator; extensible interval record | Deterministic generation and OHLC validation tests |
 | UR-BT-001–003, 005/006; UR-STRAT-006/007 | Registered substrategies, full instrument identity, compatible netting, virtual ledgers and exports | Crossing, residual rejection, attribution, reconciliation and exports tests |
 | UR-EQ-001–005 | Market, limit, opening, closing, and equity shorts | Timing, gap fills, session/DST/holiday, limit, short-availability tests |
-| UR-STRAT-001–003/005 | C# API, rebalance helper, external-data snapshots, SMA/EMA | Pending-aware rebalance, snapshot replay and indicator tests |
+| UR-STRAT-001–003/005 | C# API, rebalance helper, per-run external-data cache, SMA/EMA | Pending-aware rebalance, external-data cache and indicator tests |
 | UR-TEST-001 | Dependency-free automated unit/integration executable | `dotnet run --project tests/Citrus.Tests` |
 | UR-SCOPE-002–007; UR-OPT-001/002 | Planned optimisation, walk-forward, GUI editing/execution/analysis | Deferred; no implementation claim |
 | UR-PLAT-002/005; UR-BRK-001/002; UR-LIVE-001–003 | Live execution and GUI remain later releases | Deferred; only market-data connections implemented |
 
 ## Acceptance evidence and limits
 
-The tests cover deterministic next-bar decisions, compatible and incompatible netting, exact commission allocation, accounting and corporate actions, validation failures, cache reuse, provider pagination, credential-safe provider errors, compiler errors, export totals, and replay snapshots. CI additionally executes CLI generation/backtests and portable replay. The performance harness runs the research-scale daily and hourly cases with no timing threshold.
+The tests cover deterministic next-bar decisions, compatible and incompatible netting, exact commission allocation, accounting and corporate actions, validation failures, cache reuse, provider pagination, credential-safe provider errors, compiler errors, and export totals. CI additionally executes CLI generation and backtests. The performance harness runs the research-scale daily and hourly cases with no timing threshold.
 
 HTTP tests use realistic offline fixtures, not credentials. Credentialed acceptance is opt-in: execute the documented `data download` commands with an entitled account and an available date range. Provider coverage/entitlements and historical action completeness cannot be established by offline tests. Funding mark approximation, daily dividend recognition, common settlement currency, full fills, and bar-based liquidation are documented in simulation rules and dataset metadata.

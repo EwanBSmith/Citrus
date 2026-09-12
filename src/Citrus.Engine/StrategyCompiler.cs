@@ -25,7 +25,7 @@ public sealed class CompiledStrategy : IDisposable
     private readonly AssemblyLoadContext context;
     /// <summary>Gets the instantiated strategy defined by the source file.</summary>
     public IStrategy Strategy { get; }
-    /// <summary>Gets SHA-256 hashes keyed by absolute explicit dependency paths for replay provenance.</summary>
+    /// <summary>Gets SHA-256 hashes keyed by absolute explicit dependency paths for provenance.</summary>
     public IReadOnlyDictionary<string, string> DependencyHashes { get; }
     /// <summary>Retains the load context, strategy instance, and dependency hashes for execution and disposal.</summary>
     private CompiledStrategy(AssemblyLoadContext context, IStrategy strategy, IReadOnlyDictionary<string, string> hashes)

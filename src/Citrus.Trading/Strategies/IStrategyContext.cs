@@ -23,6 +23,6 @@ public interface IStrategyContext
     void Rebalance(string substrategy, IReadOnlyDictionary<Instrument, decimal> weights);
     /// <summary>Schedules a named callback at a future UTC time; times beyond the run do not execute.</summary>
     void Schedule(DateTimeOffset time, string name);
-    /// <summary>Captures fetched bytes once per key and returns copies; replay requires the key in supplied snapshots and never fetches missing data.</summary>
+    /// <summary>Fetches bytes once per key during a run and returns defensive copies.</summary>
     byte[] ExternalData(string key, Func<byte[]> fetch);
 }
