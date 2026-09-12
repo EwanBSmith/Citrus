@@ -29,6 +29,27 @@ BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOpt
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
+Test("Global settings round trip, replace and reject malformed files without exposing values", () =>
+{
+    var path = Path.Combine(Temporary(), "profile", "config.json");
+    Equal("", GlobalConfiguration.Load(path).AlpacaApiKeyId);
+    True(!File.Exists(path));
+    new GlobalConfiguration { AlpacaApiKeyId = "fixture-key", AlpacaApiSecretKey = "fixture-secret" }.Save(path);
+    var restored = GlobalConfiguration.Load(path);
+    Equal(("fixture-key", "fixture-secret"), restored.ResolveAlpacaCredentials(_ => null));
+    Equal(("override", "fixture-secret"), restored.ResolveAlpacaCredentials(name => name == "APCA_API_KEY_ID" ? "override" : ""));
+    restored.AlpacaApiSecretKey = "";
+    restored.Save(path);
+    Throws<InvalidOperationException>(() => GlobalConfiguration.Load(path).ResolveAlpacaCredentials(_ => null));
+    Equal(1, Directory.GetFiles(Path.GetDirectoryName(path)!).Length);
+    foreach (var invalid in new[] { "null", "{", "{\"schemaVersion\":2}", "{\"alpacaApiKeyId\":null}", "{\"fixture-secret\":123}" })
+    {
+        File.WriteAllText(path, invalid);
+        Throws<InvalidDataException>(() => GlobalConfiguration.Load(path));
+        Equal(invalid, File.ReadAllText(path));
+    }
+});
+
 Test("Substrategy registration permits 100 accounts and rejects the 101st", () =>
 {
     var result = Run(new CallbackStrategy(weight: 0.001m, onStart: c =>

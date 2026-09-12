@@ -3,6 +3,7 @@ using Citrus.Trading;
 using Citrus.Data;
 using Citrus.Engine;
 
+var configuredSecrets = new List<string>();
 try
 {
     if (args.Length == 0 || args[0] is "help" or "--help" or "-h")
@@ -70,8 +71,8 @@ try
                     var sessions = download.Sessions;
                     if (download.Provider == "alpaca")
                     {
-                        var key = Environment.GetEnvironmentVariable("APCA_API_KEY_ID") ?? throw new InvalidOperationException("Set APCA_API_KEY_ID.");
-                        var secret = Environment.GetEnvironmentVariable("APCA_API_SECRET_KEY") ?? throw new InvalidOperationException("Set APCA_API_SECRET_KEY.");
+                        var (key, secret) = GlobalConfiguration.Load().ResolveAlpacaCredentials();
+                        configuredSecrets.AddRange([key, secret]);
                         if (sessions.Count == 0) sessions = await AlpacaProvider.CalendarAsync(http, key, secret, DateOnly.FromDateTime(download.Request.Start.UtcDateTime), DateOnly.FromDateTime(download.Request.End.UtcDateTime));
                         provider = new AlpacaProvider(http, key, secret, sessions, download.Feed);
                     }
@@ -93,6 +94,8 @@ catch (Exception exception)
 {
     // Strategies are trusted and may throw arbitrary text; redact configured credentials before printing.
     var message = exception.Message;
+    foreach (var value in configuredSecrets.Where(value => !string.IsNullOrEmpty(value)).OrderByDescending(value => value.Length))
+        message = message.Replace(value, "[REDACTED]", StringComparison.Ordinal);
     foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
         if (entry.Key.ToString() is { } key && (key.Contains("KEY", StringComparison.OrdinalIgnoreCase) || key.Contains("SECRET", StringComparison.OrdinalIgnoreCase) || key.Contains("TOKEN", StringComparison.OrdinalIgnoreCase)) && entry.Value?.ToString() is { Length: > 3 } value)
             message = message.Replace(value, "[REDACTED]", StringComparison.Ordinal);

@@ -12,6 +12,28 @@ internal static class DesktopSmokeTest
         Directory.CreateDirectory(directory);
         try
         {
+            var globalPath = Path.Combine(Path.GetFullPath(directory), "global-config.json");
+            using (var settingsForm = new GlobalSettingsForm(globalPath))
+            {
+                Capture(settingsForm, Path.Combine(directory, "global-settings.png"), new Size(680, 390));
+                var fields = Descendants(settingsForm).OfType<TextBox>().ToArray();
+                var keyField = fields.Single(c => c.AccessibleName == "Alpaca API key ID");
+                var secretField = fields.Single(c => c.AccessibleName == "Alpaca API secret key");
+                if (!keyField.UseSystemPasswordChar || !secretField.UseSystemPasswordChar)
+                    throw new InvalidOperationException("Credentials must start masked.");
+                keyField.Text = "fixture-key";
+                secretField.Text = "fixture-secret";
+                ((Button)settingsForm.AcceptButton!).PerformClick();
+                if (GlobalConfiguration.Load(globalPath).AlpacaApiSecretKey != "fixture-secret")
+                    throw new InvalidOperationException("Global settings were not saved.");
+            }
+            using (var cancelled = new GlobalSettingsForm(globalPath))
+            {
+                Descendants(cancelled).OfType<TextBox>().Single(c => c.AccessibleName == "Alpaca API secret key").Text = "discard";
+                cancelled.Close();
+                if (GlobalConfiguration.Load(globalPath).AlpacaApiSecretKey != "fixture-secret")
+                    throw new InvalidOperationException("Cancel changed global settings.");
+            }
             var path = BacktestWorkspace.CreateExample(directory);
             var config = Json.Read<RunConfiguration>(path);
             var first = BacktestWorkspace.RunAsync(path, config).GetAwaiter().GetResult();

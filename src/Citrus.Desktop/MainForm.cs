@@ -53,7 +53,13 @@ internal sealed class MainForm : Form
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add(Command("&About Citrus", Keys.None, () => MessageBox.Show(this,
             "Citrus Backtesting Workbench\nWindows Forms • .NET 10\n\nEdit trusted C# strategies and run deterministic backtests.\nStrategies execute with your normal process permissions.\nAll result timestamps are UTC.", "About Citrus", MessageBoxButtons.OK, MessageBoxIcon.Information)));
-        menu.Items.AddRange([file, run, help]);
+        var settings = new ToolStripMenuItem("&Settings");
+        settings.DropDownItems.Add(Command("&Global settings...", Keys.None, () =>
+        {
+            using var dialog = new GlobalSettingsForm();
+            dialog.ShowDialog(this);
+        }));
+        menu.Items.AddRange([file, run, settings, help]);
         MainMenuStrip = menu;
         AddButton("Open...", Open);
         AddButton("New example...", CreateExample);

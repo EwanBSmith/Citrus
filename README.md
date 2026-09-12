@@ -40,6 +40,22 @@ dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --
 
 The smoke check writes its outcome and layout PNGs to the specified folder, and returns a nonzero exit code on failure. `Citrus.slnx` remains the portable engine/CLI solution; `Citrus.Windows.slnx` adds the desktop application.
 
+## Global settings
+
+Open **Settings → Global settings** in the Windows workbench to edit Alpaca API credentials. **Save** creates or replaces the per-user file; **Cancel** discards edits. Credentials are masked by default and can be revealed explicitly. Clear a field and save to remove its stored value.
+
+Both the desktop and CLI use `Citrus/config.json` under the operating system's application-data directory (`%APPDATA%\Citrus\config.json` on Windows). The dialog displays the full path. A missing file uses empty defaults; malformed or unsupported files produce an error and are not overwritten automatically. Credentials are stored as plain text, so keep this file private and outside source control. Global settings are not included in run configurations or replay exports.
+
+```json
+{
+  "schemaVersion": 1,
+  "alpacaApiKeyId": "",
+  "alpacaApiSecretKey": ""
+}
+```
+
+Alpaca downloads read saved credentials on each invocation. Nonempty `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` environment variables override their respective saved fields. Hyperliquid requires no credentials.
+
 ## CLI examples
 
 ```sh
@@ -136,7 +152,7 @@ dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data d
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data import artifacts/alpaca-data.json artifacts/combined.json supplement.json
 ```
 
-Set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the environment for Alpaca. No credentials belong in JSON files. Hyperliquid public historical data requires no key. Download commands are opt-in network operations; the normal tests do not invoke them. Update the Hyperliquid example's date range to available completed history.
+Configure Alpaca credentials through **Settings → Global settings**, or set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the environment. Keep credentials out of run and download JSON files; the private per-user global file is the only configuration intended to store them. Hyperliquid public historical data requires no key. Download commands are opt-in network operations; the normal tests do not invoke them. Update the Hyperliquid example's date range to available completed history.
 
 Alpaca supplies exchange calendar sessions, raw minute bars aggregated into regular-session hourly/daily bars, and corporate actions. Hourly buckets start at the session open, with a shorter final bucket where necessary. Missing no-trade minutes are not synthesized, but every expected hourly/daily bucket must contain data. IEX is the example feed; configure `feed` for your account's entitlement. The calendar includes holidays, daylight-saving changes, and early closes. User-imported equity datasets must provide explicit UTC sessions and correct opening/closing flags.
 
