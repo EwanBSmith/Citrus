@@ -1,4 +1,4 @@
-using Citrus.Contracts;
+using Citrus.Trading;
 using Citrus.Data;
 using Citrus.Simulation;
 

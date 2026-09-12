@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using Citrus.Contracts;
+using Citrus.Trading;
 
 namespace Citrus.Data;
 

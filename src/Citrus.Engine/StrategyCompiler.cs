@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Security.Cryptography;
-using Citrus.Contracts;
+using Citrus.Trading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 

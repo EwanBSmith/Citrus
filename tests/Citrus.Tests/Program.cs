@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Citrus.Contracts;
+using Citrus.Trading;
 using Citrus.Data;
 using Citrus.Engine;
 using Citrus.Simulation;
@@ -151,14 +151,14 @@ Test("Hyperliquid fails on missing candle history", () =>
 });
 Test("Roslyn compilation diagnostics and execution", () =>
 {
-    var directory = Temporary(); var path = Path.Combine(directory, "strategy.cs"); File.WriteAllText(path, "using Citrus.Contracts; public sealed class Example : IStrategy { }");
+    var directory = Temporary(); var path = Path.Combine(directory, "strategy.cs"); File.WriteAllText(path, "using Citrus.Trading; public sealed class Example : IStrategy { }");
     using var compiled = CompiledStrategy.Load(path); Run(compiled.Strategy);
     File.WriteAllText(path, "this is invalid C#"); Throws<InvalidDataException>(() => CompiledStrategy.Load(path));
 });
 Test("Export totals and portable replay inputs", () =>
 {
     var directory = Temporary(); var strategy = Path.Combine(directory, "strategy.cs"); var dataPath = Path.Combine(directory, "data.json");
-    File.WriteAllText(strategy, "using Citrus.Contracts; public class Example : IStrategy { }"); var data = Data(100, 110); Json.Write(dataPath, data);
+    File.WriteAllText(strategy, "using Citrus.Trading; public class Example : IStrategy { }"); var data = Data(100, 110); Json.Write(dataPath, data);
     var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 2))), data);
     var output = Path.Combine(directory, "result"); Reports.Export(output, result, Config(), data, strategy, dataPath, new Dictionary<string, string>());
     using var summary = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "summary.json")));
@@ -170,13 +170,13 @@ Test("Export totals and portable replay inputs", () =>
 Test("Repeated exports replace results and inputs while retaining unrelated files", () =>
 {
     var directory = Temporary(); var strategy = Path.Combine(directory, "strategy.cs"); var dataPath = Path.Combine(directory, "data.json");
-    File.WriteAllText(strategy, "using Citrus.Contracts; public class First : IStrategy { }");
+    File.WriteAllText(strategy, "using Citrus.Trading; public class First : IStrategy { }");
     var data = Data(100, 110); Json.Write(dataPath, data);
     var output = Path.Combine(directory, "result");
     Reports.Export(output, Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument, 2)), data), Config(), data, strategy, dataPath, new Dictionary<string, string>());
     File.WriteAllText(Path.Combine(output, "notes.txt"), "keep");
     File.WriteAllText(Path.Combine(output, "inputs", "old-dependency.dll"), "stale");
-    File.WriteAllText(strategy, "using Citrus.Contracts; public class Second : IStrategy { }");
+    File.WriteAllText(strategy, "using Citrus.Trading; public class Second : IStrategy { }");
     data = Data(100, 120); Json.Write(dataPath, data);
     var result = Run(new CallbackStrategy(), data);
     Reports.Export(output, result, Config(), data, strategy, dataPath, new Dictionary<string, string>());
@@ -394,7 +394,7 @@ Test("Compiled C# strategies can call direct order functions", () =>
 {
     var path = Path.Combine(Temporary(), "direct.cs");
     File.WriteAllText(path, """
-        using Citrus.Contracts;
+        using Citrus.Trading;
         public sealed class Direct : IStrategy
         {
             public void OnStart(IStrategyContext c)

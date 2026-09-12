@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Citrus.Contracts;
+using Citrus.Trading;
 
 /// <summary>Demonstrates buying ten units at the next eligible equity session open after the first completed bar.</summary>
 public sealed class EquityHold : IStrategy

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
-using Citrus.Contracts;
+using Citrus.Trading;
 
 /// <summary>Demonstrates a single-instrument SMA trend allocation alongside a passive holding allocation.</summary>
 public sealed class PerpetualTrend : IStrategy
