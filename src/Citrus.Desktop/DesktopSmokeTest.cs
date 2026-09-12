@@ -36,6 +36,35 @@ internal static class DesktopSmokeTest
             }
             var path = BacktestWorkspace.CreateExample(directory);
             var config = Json.Read<RunConfiguration>(path);
+            var library = Path.Combine(Path.GetFullPath(directory), "historical-library");
+            Directory.CreateDirectory(library);
+            var fixture = Citrus.Data.BrownianGenerator.Generate(new Citrus.Trading.Instrument("hyperliquid", Citrus.Trading.AssetClass.LinearPerpetual, "BTC"),
+                Citrus.Trading.BarInterval.Hourly, DateTimeOffset.Parse("2024-01-01T00:00:00Z"), 24, 42);
+            Json.Write(Path.Combine(library, "fixture.json"), fixture);
+            File.WriteAllText(Path.Combine(library, "broken.json"), "{broken");
+            Json.Write(Path.Combine(library, "empty.json"), new MarketDataset());
+            var entries = HistoricalDataLibrary.Scan(library);
+            if (entries.Count != 3 || entries.Count(e => e.Status == "Valid") != 1 || entries.Single(e => e.Status == "Valid").Bars != 24)
+                throw new InvalidOperationException("Library scanning did not isolate invalid datasets.");
+            var exported = Path.Combine(directory, "historical-export.json");
+            HistoricalDataLibrary.Export(Path.Combine(library, "fixture.json"), exported);
+            HistoricalDataLibrary.Export(Path.Combine(library, "fixture.json"), exported);
+            if (Json.Read<MarketDataset>(exported).Bars.Count != 24) throw new InvalidOperationException("Historical export lost bars.");
+            ExpectFailure(() => HistoricalDataLibrary.Export(Path.Combine(library, "broken.json"), exported));
+            if (Json.Read<MarketDataset>(exported).Bars.Count != 24) throw new InvalidOperationException("Invalid export damaged an existing file.");
+            using (var history = new HistoricalDataForm(library))
+            {
+                Capture(history, Path.Combine(directory, "historical-data.png"), new Size(1100, 760));
+                var historyGrid = Descendants(history).OfType<DataGridView>().Single();
+                var historyWait = System.Diagnostics.Stopwatch.StartNew();
+                while (historyGrid.Rows.Count != 3)
+                {
+                    if (historyWait.Elapsed > TimeSpan.FromSeconds(10)) throw new TimeoutException("Historical library did not load.");
+                    Application.DoEvents(); Thread.Sleep(10);
+                }
+                Capture(history, Path.Combine(directory, "historical-data.png"), new Size(1100, 760));
+                Capture(history, Path.Combine(directory, "historical-data-compact.png"), new Size(900, 700));
+            }
             var first = BacktestWorkspace.RunAsync(path, config).GetAwaiter().GetResult();
             if (first.Result.Fills.Count != 1 || first.Result.Equity.Count < 365)
                 throw new InvalidOperationException("Example did not execute the expected holding strategy.");

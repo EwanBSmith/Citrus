@@ -59,7 +59,9 @@ internal sealed class MainForm : Form
             using var dialog = new GlobalSettingsForm();
             dialog.ShowDialog(this);
         }));
-        menu.Items.AddRange([file, run, settings, help]);
+        var data = new ToolStripMenuItem("&Data");
+        data.DropDownItems.Add(Command("&Historical data...", Keys.None, OpenHistoricalData));
+        menu.Items.AddRange([file, run, data, settings, help]);
         MainMenuStrip = menu;
         AddButton("Open...", Open);
         AddButton("New example...", CreateExample);
@@ -69,6 +71,7 @@ internal sealed class MainForm : Form
         AddButton("Run backtest (F5)", () => _ = RunAsync());
         toolbar.Items.Add(new ToolStripSeparator());
         AddButton("Results folder", OpenResults);
+        AddButton("Historical data...", OpenHistoricalData);
 
         var workspace = new SplitContainer { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel1, Size = new Size(1200, 700), SplitterDistance = 210, Panel1MinSize = 160 };
         workspace.Panel1.Controls.Add(navigation);
@@ -109,6 +112,13 @@ internal sealed class MainForm : Form
         configEditor.ConfigurationChanged += (_, _) => { if (!loading) configDirty = true; UpdateTitle(); };
         FormClosing += OnClosing;
         if (initialPath is not null) Shown += (_, _) => Guard(() => LoadConfiguration(initialPath));
+    }
+
+    /// <summary>Opens the historical download and local dataset management dialog.</summary>
+    private void OpenHistoricalData()
+    {
+        using var dialog = new HistoricalDataForm();
+        dialog.ShowDialog(this);
     }
 
     /// <summary>Creates a monospaced, plain-text editor with tabs and unwrapped source lines.</summary>

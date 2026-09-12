@@ -44,6 +44,10 @@ The smoke check writes its outcome and layout PNGs to the specified folder, and 
 
 ## Global settings
 
+Open **Data → Historical data** (or the toolbar button) to download Alpaca equities or Hyperliquid perpetual history at hourly or daily intervals. Choose a symbol, venue, data version, and UTC date range; the end date is exclusive. Alpaca uses Global settings credentials and the selected IEX/SIP feed. Downloads fetch missing history through the existing validated cache and can be cancelled.
+
+The default library is `%LOCALAPPDATA%\Citrus\HistoricalData`; **Browse** selects another folder, including an existing CLI cache. **Refresh** lists each JSON dataset's instruments, coverage bounds, bar count, size and structural validation status. Bounds do not guarantee gap-free coverage. Invalid files remain visible. Select a dataset to inspect its path and provider notes, **Export selected** to a normalized JSON file, or **Copy path** for the run configuration's data field. **Delete selected** confirms the exact file before permanently removing it. Do not run another cache writer against the same folder while downloading.
+
 Open **Settings → Global settings** in the Windows workbench to edit Alpaca API credentials. **Save** creates or replaces the per-user file; **Cancel** discards edits. Credentials are masked by default and can be revealed explicitly. Clear a field and save to remove its stored value.
 
 Both the desktop and CLI use `Citrus/config.json` under the operating system's application-data directory (`%APPDATA%\Citrus\config.json` on Windows). The dialog displays the full path. A missing file uses empty defaults; malformed or unsupported files produce an error and are not overwritten automatically. Credentials are stored as plain text, so keep this file private and outside source control. Global settings are not included in run configurations or replay exports.
