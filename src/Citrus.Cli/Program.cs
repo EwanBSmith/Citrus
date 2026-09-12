@@ -27,15 +27,13 @@ try
     {
         var configPath = Path.GetFullPath(args[1]);
         var root = Path.GetDirectoryName(configPath)!;
-        // Resolve all run inputs together so captured configurations remain portable for replay.
         // Return an absolute path using the configuration directory as the base for relative paths.
         string Resolve(string path) => Path.GetFullPath(path, root);
         var config = Json.Read<RunConfiguration>(configPath);
         var strategy = Resolve(config.Strategy); var dataPath = Resolve(config.Data); var output = Resolve(config.Output);
         var data = Json.Read<MarketDataset>(dataPath);
         using var compiled = CompiledStrategy.Load(strategy, config.References.Select(Resolve));
-        var snapshots = config.ReplaySnapshots is null ? null : Json.Read<Dictionary<string, byte[]>>(Resolve(config.ReplaySnapshots));
-        var result = new BacktestEngine().Run(compiled.Strategy, data, config, snapshots: snapshots);
+        var result = new BacktestEngine().Run(compiled.Strategy, data, config);
         Reports.Export(output, result, config, data, strategy, dataPath, compiled.DependencyHashes);
         Console.WriteLine($"Completed: {result.Fills.Count} attributed fills; final equity {result.Final.Equity.ToString("F2", CultureInfo.InvariantCulture)}. Results: {output}"); return 0;
     }

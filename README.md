@@ -24,7 +24,7 @@ dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data g
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/equity-run.json
 ```
 
-Rerunning a backtest overwrites its result files and captured replay inputs in the configured output directory. Data commands also overwrite their output file, so the example commands can be rerun as written. Other files in the result directory are retained; the manifest lists only the current run's inputs. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
+Rerunning a backtest overwrites its result files in the configured output directory. Data commands also overwrite their output file, so the example commands can be rerun as written. Other files in the result directory are retained. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
 
 The perpetual example has a trend substrategy and a holding substrategy with 70/30 capital allocation. The equity example demonstrates next-session opening orders across a weekend and the US daylight-saving transition. Generated prices have zero funding and no corporate actions unless supplementary events are added.
 
@@ -67,7 +67,7 @@ Register substrategies during startup with positive capital weights summing to a
 
 Callbacks run sequentially. `History` exposes completed bars only and returns copies. `OnScheduled`, `OnOrderUpdate`, `OnFill`, and `OnStop` are optional. Schedules require future UTC times within the run to execute. Orders may be cancelled by ID. SMA and EMA return `null` until their warmup period is available. `Mode` exposes backtest/live context through the same contract; this release does not connect to a live trading venue.
 
-Strategies run as **trusted local code**, with normal process permissions, libraries, network access, and filesystem access. They are not sandboxed. Use `ExternalData(key, fetch)` to capture arbitrary binary API responses once per key. Replays supply those bytes without fetching again. Other I/O, wall-clock reads, and script-owned random sources cannot be monitored or guaranteed reproducible by this engine.
+Strategies run as **trusted local code**, with normal process permissions, libraries, network access, and filesystem access. They are not sandboxed. Use `ExternalData(key, fetch)` to fetch arbitrary binary API responses once per key during a run. Other I/O, wall-clock reads, and script-owned random sources cannot be monitored or guaranteed reproducible by this engine.
 
 ## Market data
 
@@ -89,19 +89,13 @@ Cache entries are keyed by provider/feed, venue, asset class, symbol, interval, 
 
 The corporate-action feed is filtered by **process date**, which can differ from effective date. Verify coverage with supplementary events; the engine cannot discover events missing from every source. Known unsupported or incomplete provider actions fail normalization. See [Alpaca corporate actions](https://docs.alpaca.markets/us/reference/corporateactions-1), [historical bars](https://docs.alpaca.markets/us/reference/stockbars), and [Hyperliquid info API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint).
 
-## Results and replay
+## Results
 
 Each successful output directory contains orders, fills, positions, cash movements/costs, equity observations, substrategy equity attribution, final instrument P&L attribution, and a performance summary. All tabular exports have JSON and/or CSV representations; timestamps use UTC and CSV numbers use invariant formatting. Internal fills are explicitly marked. Per-instrument net P&L includes realized/unrealized P&L, fees, dividends, borrow, and funding; its sum plus starting capital is checked against portfolio equity.
 
 The summary reports total return, maximum observed drawdown, and sample-standard-deviation Sharpe on UTC daily closing equity. Annualization uses 252 observations for equities-only runs and 365 if perpetuals are included, with risk-free rate defaulting to zero. Undefined returns or Sharpe are `null`; symbol-level returns are not manufactured without an allocated symbol capital base. Execution cost is already embedded in fill prices and is separately reported as a diagnostic, never deducted twice.
 
-`manifest.json` includes configuration, seed, input/calendar/snapshot/dependency/component hashes, runtime and engine versions, provider metadata, and limitations. `inputs/` captures the strategy, data, explicit dependencies, external snapshots, and a portable run configuration:
-
-```sh
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest artifacts/perpetual-result/inputs/run.json
-```
-
-This writes to `artifacts/perpetual-result/replay`. Compare fills and equity, rather than manifests containing source paths. Reproducibility assumes the same engine/runtime and a deterministic trusted strategy. There are no checkpoints; interrupted runs restart. Only completed runs are exported.
+`manifest.json` includes configuration, seed, strategy/data/dependency/component hashes, the calendar hash, runtime and engine versions, provider metadata, and repeatability limitations. Run the same configuration again to repeat a result; repeatability assumes unchanged inputs and engine/runtime plus a deterministic trusted strategy. There are no checkpoints; interrupted runs restart. Only completed runs are exported.
 
 ## Design and verification
 
@@ -125,4 +119,4 @@ dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore -- --
 
 The benchmark uses 100 symbols, 20 substrategies, SMA calculations, and 2,000 initial orders. It measures engine execution, excluding data generation. Initial Windows/.NET 10 measurements: 365,000 daily bars in 15.978 seconds (205 MiB process peak), and 1,752,000 hourly bars in 70.822 seconds (764 MiB process peak). Memory is the process high-water mark, including dataset generation; these are observations, not hardware-independent limits.
 
-GitHub Actions is configured to build, run offline tests, and execute both examples plus replay on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.
+GitHub Actions is configured to build, run offline tests, and execute both examples on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.

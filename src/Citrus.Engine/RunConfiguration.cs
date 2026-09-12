@@ -15,8 +15,6 @@ public sealed record RunConfiguration
     public string Data { get; init; } = "";
     /// <summary>Gets the results directory, resolved relative to the run configuration by the CLI.</summary>
     public string Output { get; init; } = "results";
-    /// <summary>Gets an optional captured snapshot file; null enables fetching and capture during the run.</summary>
-    public string? ReplaySnapshots { get; init; }
     /// <summary>Gets starting portfolio cash, including capital not allocated to a substrategy.</summary>
     public decimal InitialCash { get; init; } = 100_000;
     /// <summary>Gets the seed used for simulated external order rejection draws.</summary>

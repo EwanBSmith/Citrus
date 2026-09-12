@@ -9,7 +9,7 @@ namespace Citrus.Engine;
 
 /// <summary>Reports fractional return and drawdown, annualized Sharpe, and the number of usable daily returns; undefined metrics are null.</summary>
 public sealed record Performance(decimal? TotalReturn, decimal MaximumDrawdown, double? AnnualizedSharpe, int DailyObservations);
-/// <summary>Calculates performance and exports results with portable replay inputs and provenance hashes.</summary>
+/// <summary>Calculates performance and exports results with provenance hashes.</summary>
 public static class Reports
 {
     /// <summary>Computes drawdown over ordered observations and sample-deviation Sharpe from UTC daily closing equity after the initial observation.</summary>
@@ -42,7 +42,7 @@ public static class Reports
         return new(values[0].Equity > 0 ? values[^1].Equity / values[0].Equity - 1 : null, drawdown, sharpe, returns.Count);
     }
 
-    /// <summary>Writes JSON/CSV results and captured replay inputs, replacing matching output files while retaining unrelated files.</summary>
+    /// <summary>Writes JSON/CSV results, replacing matching output files while retaining unrelated files.</summary>
     public static void Export(string directory, BacktestResult result, RunConfiguration configuration, MarketDataset data,
         string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes)
     {
@@ -85,16 +85,6 @@ public static class Reports
         Csv(Path.Combine(directory, "equity.csv"), ["time", "cash", "equity", "grossExposure", "return", "drawdown"], equityRows);
         Csv(Path.Combine(directory, "attribution.csv"), ["time", "substrategy", "equity"], result.Equity.SelectMany(p =>
             p.Substrategies.Select(s => new object?[] { p.Time, s.Key, s.Value })));
-        var replay = Path.Combine(directory, "inputs"); Directory.CreateDirectory(replay);
-        CopyInput(strategyPath, Path.Combine(replay, "strategy.cs")); CopyInput(dataPath, Path.Combine(replay, "data.json"));
-        var references = new List<string>(); var index = 0;
-        foreach (var path in dependencyHashes.Keys)
-        {
-            var name = $"dependency-{index++}-{Path.GetFileName(path)}";
-            CopyInput(path, Path.Combine(replay, name)); references.Add(name);
-        }
-        Json.Write(Path.Combine(replay, "run.json"), configuration with { Strategy = "strategy.cs", Data = "data.json", Output = "../replay", References = references.ToArray(), ReplaySnapshots = "snapshots.json" });
-        Json.Write(Path.Combine(replay, "snapshots.json"), result.ExternalSnapshots);
         // Compute the file SHA-256 digest used to identify captured inputs and runtime components.
         string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
         Json.Write(Path.Combine(directory, "manifest.json"), new
@@ -108,19 +98,9 @@ public static class Reports
             runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
             strategyHash = Hash(strategyPath), dataHash = Hash(dataPath), dependencyHashes,
             calendarHash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(data.Sessions, Json.Options))),
-            snapshotHashes = result.ExternalSnapshots.ToDictionary(p => p.Key, p => Convert.ToHexString(SHA256.HashData(p.Value))),
-            inputHashes = references.Concat(["strategy.cs", "data.json", "run.json", "snapshots.json"])
-                .OrderBy(name => name, StringComparer.Ordinal).ToDictionary(name => name, name => Hash(Path.Combine(replay, name))),
-            reproducibility = "Guaranteed only for captured inputs on the same engine/runtime. Trusted scripts may perform untracked external I/O or randomness.",
+            reproducibility = "Repeatability requires unchanged inputs, engine/runtime, and a deterministic trusted strategy. External I/O and script-owned randomness are untracked.",
             data.Provider, data.Version, data.Notes
         });
-    }
-    /// <summary>Copies and overwrites a replay input unless source and destination resolve to the same platform-aware path.</summary>
-    private static void CopyInput(string source, string destination)
-    {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), comparison))
-            File.Copy(source, destination, overwrite: true);
     }
     /// <summary>Writes a UTF-8 CSV with quoted headers and values, invariant numbers, and round-trip timestamps.</summary>
     private static void Csv(string path, string[] headers, IEnumerable<object?[]> rows)
