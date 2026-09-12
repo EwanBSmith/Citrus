@@ -11,6 +11,8 @@ public sealed class GlobalConfiguration
     public string AlpacaApiKeyId { get; set; } = "";
     /// <summary>Gets or sets the Alpaca API secret.</summary>
     public string AlpacaApiSecretKey { get; set; } = "";
+    /// <summary>Gets or sets the main historical data cache directory; blank uses the user-local default.</summary>
+    public string HistoricalDataDirectory { get; set; } = "";
 
     /// <summary>Gets the per-user file location shared by the CLI and desktop.</summary>
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Citrus", "config.json");
@@ -29,14 +31,14 @@ public sealed class GlobalConfiguration
         catch (Exception error) when (error is JsonException or InvalidDataException)
         {
             // Parser diagnostics can contain user-supplied property names; do not expose secrets.
-            throw new InvalidDataException("Global configuration is invalid. Expected schemaVersion 1 and string credential fields.");
+            throw new InvalidDataException("Global configuration is invalid. Expected schemaVersion 1 and string credential and historical-data fields.");
         }
     }
 
     /// <summary>Validates the document before use or persistence.</summary>
     private void Validate()
     {
-        if (SchemaVersion != 1 || AlpacaApiKeyId is null || AlpacaApiSecretKey is null)
+        if (SchemaVersion != 1 || AlpacaApiKeyId is null || AlpacaApiSecretKey is null || HistoricalDataDirectory is null)
             throw new InvalidDataException("Unsupported global configuration.");
     }
 
@@ -69,5 +71,14 @@ public sealed class GlobalConfiguration
         if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(secret))
             throw new InvalidOperationException("Configure Alpaca credentials in Global settings or set APCA_API_KEY_ID and APCA_API_SECRET_KEY.");
         return (key, secret);
+    }
+
+    /// <summary>Resolves the shared historical cache, allowing an environment override for automation.</summary>
+    public string ResolveHistoricalDataDirectory(Func<string, string?>? environment = null)
+    {
+        environment ??= Environment.GetEnvironmentVariable;
+        var configured = environment("CITRUS_HISTORICAL_DATA");
+        if (string.IsNullOrWhiteSpace(configured)) configured = HistoricalDataDirectory;
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(configured) ? DataCache.DefaultDirectory : configured);
     }
 }

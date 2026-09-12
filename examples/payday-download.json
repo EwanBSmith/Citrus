@@ -3,10 +3,16 @@
   "feed": "iex",
   "cache": "../artifacts/cache",
   "request": {
-    "instrument": { "venue": "alpaca", "assetClass": "Equity", "symbol": "SCHB" },
-    "interval": { "name": "1d", "minutes": 1440 },
+    "instrument": {
+      "venue": "alpaca",
+      "assetClass": "Equity",
+      "symbol": "SCHB"
+    },
+    "interval": {
+      "name": "1d",
+      "minutes": 1440
+    },
     "start": "2024-11-01T00:00:00Z",
-    "end": "2025-01-01T00:00:00Z",
-    "version": "payday-2024-v1"
+    "end": "2025-01-01T00:00:00Z"
   }
 }

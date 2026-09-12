@@ -99,7 +99,7 @@ public static class Reports
             strategyHash = Hash(strategyPath), dataHash = Hash(dataPath), dependencyHashes,
             calendarHash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(data.Sessions, Json.Options))),
             reproducibility = "Repeatability requires unchanged inputs, engine/runtime, and a deterministic trusted strategy. External I/O and script-owned randomness are untracked.",
-            data.Provider, data.Version, data.Notes
+            data.Provider, data.Notes
         });
     }
     /// <summary>Writes a UTF-8 CSV with quoted headers and values, invariant numbers, and round-trip timestamps.</summary>

@@ -18,7 +18,7 @@ These commands work on Windows, macOS, and Linux. The automated test executable 
 
 ## Windows desktop workbench
 
-The initial GUI uses Windows Forms with native menus, a toolbar, a workspace tree, split panes, tabbed editors, sortable result tables, and an equity chart. The engine and CLI remain cross-platform; the desktop application requires Windows and the .NET 10 Desktop Runtime (included with the Windows SDK).
+The initial GUI uses Windows Forms with native menus, a toolbar, a workspace tree, split panes, tabbed editors, sortable result tables, and a ScottPlot equity chart with UTC dates, mouse pan/zoom, and right-click image export. The engine and CLI remain cross-platform; the desktop application requires Windows 10 version 2004 or later and the .NET 10 Desktop Runtime (included with the Windows SDK).
 
 ```sh
 dotnet restore Citrus.slnx --configfile NuGet.Config
@@ -26,7 +26,7 @@ dotnet build Citrus.slnx -c Release --no-restore
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
 ```
 
-Choose **New example** to create a self-contained offline workspace in a new child folder, or **Open** an existing run JSON. Edit C# on the Strategy tab and settings in the Configuration form. **Save all** (`Ctrl+S`) saves both documents; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports the same reports as the CLI. You can also pass a run JSON path as the application's first argument. Changes to the configured strategy path take effect on validation or execution, which loads that source into the editor after saving the previously displayed source to its original path.
+Choose **New example** to create an offline strategy folder and seed example prices into the main cache, or **Open** a strategy folder. Each folder contains `Strategy.cs` and `Backtests/Default.json`. Select a named backtest from the toolbar; **Copy backtest** creates another configuration with its own results directory. Edit C# on the Strategy tab and settings in the Configuration form. **Save all** (`Ctrl+S`) saves both; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports reports. Switching configurations prompts to save outstanding edits. The application also accepts a strategy folder or legacy run JSON as its first argument.
 
 The Strategy tab uses [Scintilla](https://github.com/desjarlais/Scintilla.NET) with Roslyn C# language services, bundled through NuGet. It provides syntax colours, line numbers, folding, indentation guides, matching and closing brackets, automatic indentation, undo/redo, completion for Citrus APIs and configured assemblies, hover information, and method signatures. Click the gutter to fold a block; **Edit** also offers collapse/expand commands. Editing works offline after restore, without a browser runtime or language server.
 
@@ -47,7 +47,7 @@ Compiler errors and warnings update after a short typing pause, with squiggles a
 
 Find/replace supports match case, whole words, and regular expressions. Regex replacements support capture groups such as `$1`; literal mode inserts replacement text exactly. Replace all, formatting, and comment commands each form one undo step. Formatting uses four spaces and preserves LF or CRLF line endings. Source editing is locked during validation and execution; opening another source resets the undo history.
 
-Configuration paths resolve relative to the run JSON. Strategies select the instruments they trade; supply their market data in the configured dataset.
+Configuration paths resolve relative to the run JSON. Strategies select the instruments they trade. A run selects an interval plus optional UTC bounds; Citrus assembles every matching instrument from the main historical cache without provider access.
 
 Overview reports portfolio performance and equity. Result tabs expose orders, fills, positions, costs, equity (including substrategy balances), and instrument attribution; click a column to sort or use `Ctrl+C` to copy selected rows. Tables show the first 5,000 records; **Results folder** opens the complete JSON/CSV exports. Runs replace matching report files. Prior results are cleared when a new run starts so a failed run cannot appear successful.
 
@@ -63,11 +63,11 @@ The smoke check writes its outcome and layout PNGs to the specified folder, and 
 
 ## Global settings
 
-Open **Data → Historical data** (or the toolbar button) to download Alpaca equities or Hyperliquid perpetual history at hourly or daily intervals. Choose a symbol, venue, data version, and UTC date range; the end date is exclusive. Alpaca uses Global settings credentials and the selected IEX/SIP feed. Downloads fetch missing history through the existing validated cache and can be cancelled.
+Open **Data → Historical data** (or the toolbar button) to download Alpaca equities or Hyperliquid perpetual history at hourly or daily intervals. Choose a symbol, venue, and UTC date range; the end date is exclusive. Alpaca uses Global settings credentials and the selected IEX/SIP feed. Downloads fetch missing history through the existing validated cache and can be cancelled.
 
-The default library is `%LOCALAPPDATA%\Citrus\HistoricalData`; **Browse** selects another folder, including an existing CLI cache. **Refresh** lists each JSON dataset's instruments, coverage bounds, bar count, size and structural validation status. Bounds do not guarantee gap-free coverage. Invalid files remain visible. Select a dataset to inspect its path and provider notes, **Export selected** to a normalized JSON file, or **Copy path** for the run configuration's data field. **Delete selected** confirms the exact file before permanently removing it. Do not run another cache writer against the same folder while downloading.
+The default library is `%LOCALAPPDATA%\Citrus\HistoricalData`. Set the main cache in **Global settings**; the `CITRUS_HISTORICAL_DATA` environment variable overrides it for automation. **Refresh** lists each JSON dataset's instruments, coverage bounds, bar count, size and structural validation status. Bounds do not guarantee gap-free coverage. Select a dataset to inspect its provider notes, export a normalized copy, or delete it after confirmation. Do not run another cache writer against the same folder while downloading.
 
-Open **Settings → Global settings** in the Windows workbench to edit Alpaca API credentials. **Save** creates or replaces the per-user file; **Cancel** discards edits. Credentials are masked by default and can be revealed explicitly. Clear a field and save to remove its stored value.
+Open **Settings → Global settings** in the Windows workbench to edit Alpaca API credentials and choose the main historical cache. **Save** creates or replaces the per-user file; **Cancel** discards edits. Credentials are masked by default and can be revealed explicitly. Clear a credential and save to remove its stored value.
 
 Both the desktop and CLI use `Citrus/config.json` under the operating system's application-data directory (`%APPDATA%\Citrus\config.json` on Windows). The dialog displays the full path. A missing file uses empty defaults; malformed or unsupported files produce an error and are not overwritten automatically. Credentials are stored as plain text, so keep this file private and outside source control. Global settings are not included in run configurations or replay exports.
 
@@ -84,11 +84,13 @@ Alpaca downloads read saved credentials on each invocation. Nonempty `APCA_API_K
 ## CLI examples
 
 ```sh
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/perpetual-data.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- validate examples/PerpetualTrend.cs
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/perpetual-run.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/equity-data.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/equity-run.json
+# Point automated/example runs at an isolated main cache (PowerShell: $env:CITRUS_HISTORICAL_DATA="artifacts/cache")
+export CITRUS_HISTORICAL_DATA="artifacts/cache"
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/cache/perpetual-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- validate examples/PerpetualTrend/Strategy.cs
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/PerpetualTrend
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/cache/equity-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/EquityHold
 ```
 
 Rerunning a backtest overwrites its result files in the configured output directory. Data commands also overwrite their output file, so the example commands can be rerun as written. Other files in the result directory are retained. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
@@ -97,14 +99,14 @@ The perpetual example has a trend substrategy and a holding substrategy with 70/
 
 ## Payday seasonality
 
-`examples/PaydaySeasonality.cs` ports the supplied Zorro `PaydaySeason` rules: buy SCHB on trading sessions 8 and 16, sell its entire long holding on session 12 and the last session of each month. Each entry buys `floor(810 / preceding session close)` whole shares; the $810 notional is fixed, not compounded. Edit the strategy constructor or `BuyNotional` amount to change the instrument or allocation. The run starts with $1,000 to leave a cash buffer for price movement and costs.
+`examples/PaydaySeasonality/Strategy.cs` ports the supplied Zorro `PaydaySeason` rules: buy SCHB on trading sessions 8 and 16, sell its entire long holding on session 12 and the last session of each month. Each entry buys `floor(810 / preceding session close)` whole shares; the $810 notional is fixed, not compounded. Edit the strategy constructor or `BuyNotional` amount to change the instrument or allocation. The run starts with $1,000 to leave a cash buffer for price movement and costs.
 
 ```sh
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data download examples/payday-download.json artifacts/payday-data.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/payday-run.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/PaydaySeasonality
 ```
 
-The download uses the existing Alpaca credentials described below and must finish before opening the run in the workbench. Alternatively import a normalized SCHB dataset at the same path. Supply **complete exchange-calendar months** in `sessions`: trading-day counts use that calendar, not observed bar counts or weekdays. Missing calendar sessions silently change the strategy dates; the strategy cannot establish calendar completeness itself. The example requests daily bars for November and December 2024. A partial bar range can use a full-month calendar, but must not truncate that calendar. Only one shared exchange calendar is currently supported by the framework.
+The download configuration writes through `artifacts/cache`; point `CITRUS_HISTORICAL_DATA` there for this example, or remove its `cache` field to use the configured main cache. The download must finish before opening the run. Supply **complete exchange-calendar months** in `sessions`: trading-day counts use that calendar, not observed bar counts or weekdays. Missing calendar sessions silently change the strategy dates; the strategy cannot establish calendar completeness itself. The example requests daily bars for November and December 2024. A partial bar range can use a full-month calendar, but must not truncate that calendar. Only one shared exchange calendar is currently supported by the framework.
 
 The strategy runs once at each session close and inspects `market.TradingDay(1)`, the next exchange session. Signals on days 7, 11, 15 and the penultimate session submit day-only market-on-close orders for days 8, 12, 16 and month end. The engine has already processed the signal day's auction and expiry before `OnBar`, so these orders remain eligible for the following auction, including early closes. Daily data is sufficient: dates match the intended Zorro windows, but sizing uses the preceding close instead of the original 15:30 price. Hourly datasets still work and use only their final daily bars. No 90-bar warmup is needed. Start before a required signal day; starting on an entry date does not retroactively submit its order. Entries without an affordable share are skipped; rejected entries cannot create a short exit. Rejected orders are not retried. A run ending before an exit date leaves the position open.
 
@@ -126,7 +128,9 @@ if (next?.DayOfMonth is 8 or 16)
 
 ## Market datasets
 
-Backtests use the `data` MarketDataset path. Prepare datasets using `data generate`, `data download`, or `data import`. Strategies can observe and trade any instrument present in that dataset, using exact, case-sensitive instrument identities. Orders for instruments without market bars fail with a missing-data error. Selecting an instrument in strategy code does not download its data.
+Backtests read the user-wide main historical cache, never a dataset path in the run JSON. `interval` is required by the model (daily by default); optional `start` and exclusive `end` fields select a slice. Identical overlapping bars are deduplicated; conflicting bars fail validation. Citrus combines matching cached files, validates interior coverage, and writes the exact assembled input to `historical-data.json` in the result directory before execution. Invalid cache files fail visibly. No provider requests occur during a backtest. Old dataset files with a `version` property remain readable; new files omit it. Remove obsolete `dataVersion` fields from run configurations and `request.version` from download configurations.
+
+Prepare the main cache with **Data → Historical data**, or place normalized outputs from `data generate`, `data download`, or `data import` in the directory selected by Global settings. Strategies can observe and trade any instrument in the assembled cache slice, using exact, case-sensitive identities. Orders for instruments without cached bars fail with a missing-data error.
 
 ## Strategies
 
@@ -179,13 +183,13 @@ dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data i
 
 Configure Alpaca credentials through **Settings → Global settings**, or set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the environment. Keep credentials out of run and download JSON files; the private per-user global file is the only configuration intended to store them. Hyperliquid public historical data requires no key. Download commands are opt-in network operations; the normal tests do not invoke them. Update the Hyperliquid example's date range to available completed history.
 
-Alpaca supplies exchange calendar sessions, raw minute bars aggregated into regular-session hourly/daily bars, and corporate actions. Hourly buckets start at the session open, with a shorter final bucket where necessary. Missing no-trade minutes are not synthesized, but every expected hourly/daily bucket must contain data. IEX is the example feed; configure `feed` for your account's entitlement. The calendar includes holidays, daylight-saving changes, and early closes. User-imported equity datasets must provide explicit UTC sessions and correct opening/closing flags.
+Alpaca supplies exchange calendar sessions, raw minute bars aggregated into regular-session hourly/daily bars, and corporate actions. Hourly buckets start at the session open, with a shorter final bucket where necessary. Missing no-trade minutes are not synthesized, but every expected hourly/daily bucket must contain data. IEX is the example feed; configure `feed` for your account's entitlement. Some instruments have entire sessions without IEX bars. These gaps fail coverage validation and the error lists the missing dates; an entitled SIP feed or imported history may supply the missing coverage. The calendar includes holidays, daylight-saving changes, and early closes. User-imported equity datasets must provide explicit UTC sessions and correct opening/closing flags.
 
 Hyperliquid downloads hourly/daily candles and paginated funding rates. Its API supplies only the latest 5,000 candles; missing history fails with a coverage error. Import older data and merge datasets instead of silently shortening the requested period. Its funding history does not include historical mark prices: the adapter uses the latest completed candle close, or the first open at dataset start. This approximation is recorded in dataset notes and the manifest; import funding events with explicit historical marks for exact funding notionals.
 
-The JSON dataset format is defined by `MarketDataset` in `Citrus.Data`. It contains `schemaVersion`, `provider`, `version`, `interval`, `bars`, `sessions`, `corporateActions`, `funding`, and `notes`. Generated files are complete examples. Supplement files may contain only events and an empty bar array; import validates the combined dataset. Duplicate bars/events fail. A successor instrument's price history must be present for a backtest containing a stock merger or symbol change.
+The JSON dataset format is defined by `MarketDataset` in `Citrus.Data`. It contains `schemaVersion`, `provider`, `interval`, `bars`, `sessions`, `corporateActions`, `funding`, and `notes`. Generated files are complete examples. Supplement files may contain only events and an empty bar array; import validates the combined dataset. Duplicate bars/events fail. A successor instrument's price history must be present for a backtest containing a stock merger or symbol change.
 
-Cache entries are keyed by provider/feed, venue, asset class, symbol, interval, and version. Valid existing bars are reused and only missing ranges fetched. Writes replace cache files atomically. Use a new explicit data version to refresh historical revisions. Cache use is single-writer; do not run concurrent downloads into the same cache. The engine validates interior coverage for each instrument's supplied range; imports do not establish unavailable history outside those boundaries.
+Cache entries are keyed by provider/feed, venue, asset class, symbol, and interval. Valid existing bars are reused and only missing ranges fetched. Writes replace cache files atomically. Cache use is single-writer; do not run concurrent downloads into the same cache. The engine validates interior coverage for each instrument's supplied range; imports do not establish unavailable history outside those boundaries.
 
 The corporate-action feed is filtered by **process date**, which can differ from effective date. Verify coverage with supplementary events; the engine cannot discover events missing from every source. Known unsupported or incomplete provider actions fail normalization. See [Alpaca corporate actions](https://docs.alpaca.markets/us/reference/corporateactions-1), [historical bars](https://docs.alpaca.markets/us/reference/stockbars), and [Hyperliquid info API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint).
 
@@ -220,3 +224,11 @@ dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore -- --
 The benchmark uses 100 symbols, 20 substrategies, SMA calculations, and 2,000 initial orders. It measures engine execution, excluding data generation. Initial Windows/.NET 10 measurements: 365,000 daily bars in 15.978 seconds (205 MiB process peak), and 1,752,000 hourly bars in 70.822 seconds (764 MiB process peak). Memory is the process high-water mark, including dataset generation; these are observations, not hardware-independent limits.
 
 GitHub Actions is configured to build, run offline tests, and execute both examples on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.
+
+## Strategy folders
+
+A strategy folder contains `Strategy.cs` and one or more `Backtests/<name>.json` files. Folder backtests omit the `strategy` property: Citrus discovers the source automatically. Output and assembly-reference paths are relative to the strategy folder. Prefer `Results/<name>` for separate outputs; copying a backtest in the app sets this automatically.
+
+`backtest <folder>` selects `Default.json`, or the only configuration when there is just one. With multiple configurations and no Default, specify a name: `backtest <folder> HigherCosts`. The name is the filename without `.json`. Existing standalone run JSON files remain supported, with their original paths relative to the run file.
+
+To migrate an existing strategy, create a folder, move its C# source to `Strategy.cs`, move the run JSON to `Backtests/Default.json`, remove the JSON `strategy` property, and adjust output/reference paths to be relative to the new strategy folder. Historical data stays in the main cache.

@@ -20,7 +20,7 @@ internal static class ProviderHttp
             if (attempt < 3 && (response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500))
             { await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), token); continue; }
             // Never echo provider response bodies or authentication headers.
-            throw new HttpRequestException($"Market data request failed with HTTP {(int)response.StatusCode}.");
+            throw new HttpRequestException($"Market data request to {message.RequestUri!.Host}{message.RequestUri.AbsolutePath} failed with HTTP {(int)response.StatusCode} ({response.StatusCode}).", null, response.StatusCode);
         }
     }
     /// <summary>Reads a provider decimal supplied either as a JSON number or an invariant numeric string.</summary>
@@ -49,7 +49,7 @@ public sealed class HyperliquidProvider(HttpClient client) : IMarketDataProvider
             return new Bar(request.Instrument, open, open.AddMinutes(request.Interval.Minutes), ProviderHttp.Number(c, "o"),
                 ProviderHttp.Number(c, "h"), ProviderHttp.Number(c, "l"), ProviderHttp.Number(c, "c"), ProviderHttp.Number(c, "v"));
         }).Where(b => b.OpenTime >= request.Start && b.CloseTime <= request.End).OrderBy(b => b.OpenTime).ToList();
-        var data = new MarketDataset { Provider = Name, Version = request.Version, Interval = request.Interval, Bars = bars };
+        var data = new MarketDataset { Provider = Name, Interval = request.Interval, Bars = bars };
         DatasetValidator.RequireCoverage(data, request.Instrument, request.Start, request.End);
         // Funding history has rates but no historical mark. Use the latest observable bar price and record this approximation.
         var funding = new List<FundingEvent>();
@@ -121,7 +121,7 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
                 slice.Sum(r => r.Volume), sessions.Any(s => s.Open == open), sessions.Any(s => s.Close == close)));
         }
         var actions = await CorporateActionsAsync(request, cancellationToken);
-        return new() { Provider = Name, Version = request.Version, Interval = request.Interval, Bars = bars, Sessions = sessions.ToList(), CorporateActions = actions,
+        return new() { Provider = Name, Interval = request.Interval, Bars = bars, Sessions = sessions.ToList(), CorporateActions = actions,
             Notes = ["Regular-session aggregation of raw minute bars; missing trade minutes are not synthesized. Corporate action API filters process dates; verify effective-date coverage with supplementary events."] };
     }
     /// <summary>Fetches process-date-filtered actions and resolves supported terms at effective session opens; incomplete or unsupported terms fail.</summary>

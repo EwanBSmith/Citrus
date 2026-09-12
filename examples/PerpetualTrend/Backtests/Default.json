@@ -1,8 +1,12 @@
 {
   "schemaVersion": 1,
-  "strategy": "PerpetualTrend.cs",
-  "data": "../artifacts/perpetual-data.json",
-  "output": "../artifacts/perpetual-result",
+  "start": "2024-01-01T00:00:00Z",
+  "end": "2024-01-31T00:00:00Z",
+  "interval": {
+    "name": "1h",
+    "minutes": 60
+  },
+  "output": "../../artifacts/perpetual-result",
   "initialCash": 100000,
   "seed": 42,
   "riskFreeRate": 0,

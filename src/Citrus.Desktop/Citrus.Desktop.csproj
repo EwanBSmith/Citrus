@@ -1,12 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Citrus.Engine/Citrus.Engine.csproj" />
     <PackageReference Include="Scintilla5.NET" Version="7.0.0" />
+    <PackageReference Include="ScottPlot.WinForms" Version="5.1.59" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.9.0" />
   </ItemGroup>
 </Project>

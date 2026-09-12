@@ -7,7 +7,7 @@ namespace Citrus.Desktop;
 internal static class HistoricalDataLibrary
 {
     /// <summary>Gets a persistent user-local library independent of individual backtest workspaces.</summary>
-    internal static string DefaultDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Citrus", "HistoricalData");
+    internal static string DefaultDirectory => GlobalConfiguration.Load().ResolveHistoricalDataDirectory();
 
     /// <summary>Reads each JSON file independently so damaged datasets remain visible for management.</summary>
     internal static List<HistoricalDataEntry> Scan(string directory)
@@ -47,7 +47,13 @@ internal static class HistoricalDataLibrary
             provider = new AlpacaProvider(client, key, secret, sessions, feed);
         }
         else provider = new HyperliquidProvider(client);
-        await new DataCache(directory).GetAsync(provider, request, sessions, token);
+        try { await new DataCache(directory).GetAsync(provider, request, sessions, token); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"Could not download {request.Instrument.Key} ({request.Interval.Name}, {provider.Name}) " +
+                $"from {request.Start:yyyy-MM-dd} to {request.End:yyyy-MM-dd} UTC. {error.Message}", error);
+        }
     }
 
     /// <summary>Validates and atomically exports a dataset for use as a backtest configuration's data file.</summary>

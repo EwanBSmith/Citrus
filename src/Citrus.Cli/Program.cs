@@ -10,8 +10,8 @@ try
     {
         Console.WriteLine("""
         Citrus: deterministic backtesting with trusted C# strategies
-          validate <strategy.cs> [reference.dll ...]
-          backtest <run.json>
+          validate <strategy-folder | strategy.cs> [reference.dll ...]
+          backtest <strategy-folder> [backtest-name] (legacy run.json also accepted)
           data generate <generation.json> <output.json>
           data import <dataset.json> <output.json> [supplement.json ...]
           data download <download.json> <output.json>
@@ -21,20 +21,23 @@ try
     }
     if (args[0] == "validate" && args.Length >= 2)
     {
-        using var compiled = CompiledStrategy.Load(args[1], args.Skip(2));
+        var folderConfig = Directory.Exists(args[1]) ? StrategyFolder.ConfigurationPath(args[1]) : null;
+        var configuration = folderConfig is null ? null : StrategyFolder.Read(folderConfig);
+        using var compiled = CompiledStrategy.Load(folderConfig is null ? args[1] : StrategyFolder.Source(folderConfig, configuration!),
+            (configuration?.References.Select(p => StrategyFolder.Resolve(folderConfig!, p)) ?? []).Concat(args.Skip(2)));
         Console.WriteLine($"Valid strategy: {compiled.Strategy.GetType().Name}"); return 0;
     }
-    if (args[0] == "backtest" && args.Length == 2)
+    if (args[0] == "backtest" && args.Length is 2 or 3)
     {
-        var configPath = Path.GetFullPath(args[1]);
-        var root = Path.GetDirectoryName(configPath)!;
+        var configPath = StrategyFolder.ConfigurationPath(args[1], args.Length == 3 ? args[2] : null);
         // Return an absolute path using the configuration directory as the base for relative paths.
-        string Resolve(string path) => Path.GetFullPath(path, root);
-        var config = Json.Read<RunConfiguration>(configPath);
-        var strategy = Resolve(config.Strategy); var output = Resolve(config.Output);
-        if (string.IsNullOrWhiteSpace(config.Data)) throw new ArgumentException("A market dataset path is required.");
-        var dataPath = Resolve(config.Data);
-        var data = Json.Read<MarketDataset>(dataPath);
+        string Resolve(string path) => StrategyFolder.Resolve(configPath, path);
+        var config = StrategyFolder.Read(configPath);
+        var strategy = StrategyFolder.Source(configPath, config); var output = Resolve(config.Output);
+        var data = DataCache.Load(GlobalConfiguration.Load().ResolveHistoricalDataDirectory(), config.Interval, config.Start, config.End);
+        Directory.CreateDirectory(output);
+        var dataPath = Path.Combine(output, "historical-data.json");
+        Json.Write(dataPath, data);
         using var compiled = CompiledStrategy.Load(strategy, config.References.Select(Resolve));
         var result = new BacktestEngine().Run(compiled.Strategy, data, config);
         Reports.Export(output, result, config, data, strategy, dataPath, compiled.DependencyHashes);
@@ -78,7 +81,8 @@ try
                     }
                     else if (download.Provider == "hyperliquid") provider = new HyperliquidProvider(http);
                     else throw new ArgumentException("Provider must be alpaca or hyperliquid.");
-                    dataset = await new DataCache(Path.GetFullPath(download.Cache, configRoot)).GetAsync(provider, download.Request, sessions);
+                    var cache = string.IsNullOrWhiteSpace(download.Cache) ? GlobalConfiguration.Load().ResolveHistoricalDataDirectory() : Path.GetFullPath(download.Cache, configRoot);
+                    dataset = await new DataCache(cache).GetAsync(provider, download.Request, sessions);
                 }
                 break;
             default: throw new ArgumentException("Unknown data command.");
@@ -105,8 +109,8 @@ catch (Exception exception)
 /// <summary>Defines synthetic price generation inputs, including explicit sessions for equities.</summary>
 internal sealed record Generation(Instrument Instrument, BarInterval Interval, DateTimeOffset Start, int Count, int Seed = 42,
     decimal InitialPrice = 100, double AnnualDrift = 0.05, double AnnualVolatility = 0.2, List<MarketSession>? Sessions = null);
-/// <summary>Defines provider download settings and a cache path relative to the configuration file.</summary>
-internal sealed record Download(string Provider, DataRequest Request, string Cache = ".cache", string Feed = "iex")
+/// <summary>Defines provider download settings and an optional cache path relative to the configuration file; blank uses the main cache.</summary>
+internal sealed record Download(string Provider, DataRequest Request, string Cache = "", string Feed = "iex")
 {
     public List<MarketSession> Sessions { get; init; } = [];
 }

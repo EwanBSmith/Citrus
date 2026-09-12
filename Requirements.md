@@ -76,9 +76,9 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-DATA-005** Citrus shall provide a geometric or arithmetic Brownian-motion data generator, as selected in the detailed design, for simulated prices.
 - **UR-DATA-006** Citrus shall initially support daily and hourly data intervals.
 - **UR-DATA-007** The market-data architecture shall permit additional data intervals to be added later.
-- **UR-DATA-008** Backtests shall read a MarketDataset. Strategies shall select the instruments they trade and may access history and place orders for any instrument present in the dataset. Orders for instruments without market bars shall fail with a missing-data error.
+- **UR-DATA-008** Backtests shall assemble a MarketDataset from matching entries in the user-wide historical data cache. Strategies shall select the instruments they trade and may access history and place orders for any instrument in that assembled dataset. Orders for instruments without cached market bars shall fail with a missing-data error.
 - **UR-DATA-009** Data download commands shall cache historical coverage from Alpaca for equities or Hyperliquid for perpetuals for reuse. Unavailable coverage shall fail rather than shorten it silently.
-- **UR-DATA-010** Backtests using prepared market datasets shall run without provider network access.
+- **UR-DATA-010** Backtests shall read prepared history from the main cache without provider network access and shall capture the assembled dataset with their results.
 
 ### 3.5 Backtesting and results
 
@@ -138,7 +138,7 @@ The following decisions are needed before the requirements can be made fully tes
 9. Define supported .NET and operating-system versions and whether the GUI must be native or may use a cross-platform web or desktop framework.
 10. Define secrets management and the security boundary for broker credentials and third-party API keys.
 11. Define the required reports and metrics, including trades, orders, equity curve, drawdown, returns, risk measures, and attribution by substrategy and symbol.
-12. Define reproducibility requirements, including market-data versioning, configuration capture, random seeds, engine version, and exportable run manifests.
+12. Define reproducibility requirements, including captured market-data snapshots, configuration capture, random seeds, engine version, and exportable run manifests.
 13. Define measurable performance targets for backtest speed, supported history length, symbol count, strategy count, optimisation scale, and live execution latency.
 
 ## 5 Terminology to Standardise

@@ -84,7 +84,9 @@ public static class DatasetValidator
     {
         var actual = data.Bars.Where(b => b.Instrument == instrument).Select(b => (b.OpenTime, b.CloseTime)).ToHashSet();
         var missing = Expected(instrument, data.Interval, start, end, data.Sessions).Where(x => !actual.Contains(x)).ToArray();
-        if (missing.Length > 0) throw new InvalidDataException($"Missing {missing.Length} bars for {instrument.Key}; first gap {missing[0].Open:O}. Import the missing history.");
+        if (missing.Length > 0) throw new InvalidDataException($"Missing {missing.Length} {data.Interval.Name} bars for {instrument.Key} from {data.Provider}. " +
+            $"Missing UTC bar starts: {string.Join(", ", missing.Take(12).Select(b => b.Open.ToString("yyyy-MM-dd HH:mm")))}. " +
+            "The selected data has no bars for these sessions. Import the missing history or use another available feed.");
     }
 }
 
@@ -120,13 +122,13 @@ public static class BrownianGenerator
             bars.Add(new(instrument, open, close, (decimal)first, (decimal)high, (decimal)low, (decimal)price, 1_000_000,
                 sessions?.Any(s => s.Open == open) == true, sessions?.Any(s => s.Close == close) == true));
         }
-        return new() { Provider = "gbm", Version = $"gbm-v1-seed-{seed}", Interval = interval, Bars = bars, Sessions = sessions?.ToList() ?? [],
+        return new() { Provider = "gbm", Interval = interval, Bars = bars, Sessions = sessions?.ToList() ?? [],
             Notes = ["Synthetic GBM prices. No corporate actions or funding generated; funding is zero unless supplementary events are imported."] };
     }
 }
 
-/// <summary>Specifies an instrument, interval, UTC coverage range, and explicit data revision for a provider.</summary>
-public sealed record DataRequest(Instrument Instrument, BarInterval Interval, DateTimeOffset Start, DateTimeOffset End, string Version = "1");
+/// <summary>Specifies an instrument, interval, UTC coverage range, for a provider.</summary>
+public sealed record DataRequest(Instrument Instrument, BarInterval Interval, DateTimeOffset Start, DateTimeOffset End);
 /// <summary>Supplies normalized historical market data for an explicit instrument and coverage request.</summary>
 public interface IMarketDataProvider
 {
@@ -136,9 +138,57 @@ public interface IMarketDataProvider
     Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Caches versioned provider data on disk, fetching missing ranges; callers must ensure a single writer.</summary>
+/// <summary>Caches provider data on disk, fetching missing ranges; callers must ensure a single writer.</summary>
 public sealed class DataCache(string directory)
 {
+    /// <summary>Gets the persistent user-local cache used by normal CLI and desktop backtests.</summary>
+    public static string DefaultDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Citrus", "HistoricalData");
+
+    /// <summary>Loads and combines matching cached datasets without performing provider I/O.</summary>
+    public static MarketDataset Load(string directory, BarInterval interval, DateTimeOffset? start = null,
+        DateTimeOffset? end = null)
+    {
+        if (interval.Minutes <= 0 || start is not null && start.Value.Offset != TimeSpan.Zero ||
+            end is not null && end.Value.Offset != TimeSpan.Zero || start is not null && end is not null && start >= end)
+            throw new ArgumentException("Historical cache selection requires a positive interval and a valid UTC range.");
+        directory = Path.GetFullPath(directory);
+        if (!Directory.Exists(directory)) throw new DirectoryNotFoundException($"Historical data cache does not exist: {directory}");
+        var datasets = new List<MarketDataset>();
+        foreach (var path in Directory.EnumerateFiles(directory, "*.json").Order(StringComparer.Ordinal))
+        {
+            MarketDataset data;
+            try { data = Json.Read<MarketDataset>(path); DatasetValidator.Validate(data); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or ArgumentException or NullReferenceException)
+            { throw new InvalidDataException($"Historical cache entry is invalid: {path}", error); }
+            if (data.Interval != interval) continue;
+            var bars = data.Bars.Where(b => (start is null || b.OpenTime >= start) && (end is null || b.CloseTime <= end)).ToList();
+            if (bars.Count == 0) continue;
+            datasets.Add(data with
+            {
+                Bars = bars,
+                Sessions = data.Sessions,
+                CorporateActions = data.CorporateActions.Where(a => (start is null || a.Time >= start) && (end is null || a.Time < end)).ToList(),
+                Funding = data.Funding.Where(f => (start is null || f.Time >= start) && (end is null || f.Time < end)).ToList()
+            });
+        }
+        if (datasets.Count == 0)
+            throw new InvalidDataException($"The main historical cache contains no {interval.Name} data matching the requested range.");
+        var result = new MarketDataset
+        {
+            Provider = string.Join("+", datasets.Select(d => d.Provider).Distinct().Order(StringComparer.Ordinal)),
+            Interval = interval,
+            Bars = datasets.SelectMany(d => d.Bars).Distinct().OrderBy(b => b.OpenTime).ThenBy(b => b.Instrument.Key, StringComparer.Ordinal).ToList(),
+            Sessions = datasets.SelectMany(d => d.Sessions).Distinct().OrderBy(s => s.Open).ToList(),
+            CorporateActions = datasets.SelectMany(d => d.CorporateActions).DistinctBy(a => a.Id).OrderBy(a => a.Time).ToList(),
+            Funding = datasets.SelectMany(d => d.Funding).DistinctBy(f => (f.Instrument, f.Time)).OrderBy(f => f.Time).ToList(),
+            Notes = datasets.SelectMany(d => d.Notes).Distinct().ToList()
+        };
+        DatasetValidator.Validate(result);
+        foreach (var group in result.Bars.GroupBy(b => b.Instrument))
+            DatasetValidator.RequireCoverage(result, group.Key, start ?? group.Min(b => b.OpenTime), end ?? group.Max(b => b.CloseTime));
+        return result;
+    }
+
     /// <summary>Reuses validated cached bars, fetches missing ranges, requires coverage, and atomically replaces the cache before returning the requested slice.</summary>
     public async Task<MarketDataset> GetAsync(IMarketDataProvider provider, DataRequest request, IReadOnlyList<MarketSession> sessions,
         CancellationToken cancellationToken = default)
@@ -146,9 +196,21 @@ public sealed class DataCache(string directory)
         if (request.Start >= request.End || request.Start.Offset != TimeSpan.Zero || request.End.Offset != TimeSpan.Zero || request.Interval.Minutes <= 0)
             throw new ArgumentException("Coverage must be a nonempty UTC range.");
         Directory.CreateDirectory(directory);
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{provider.Name}|{request.Instrument.Key}|{request.Interval}|{request.Version}")));
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{provider.Name}|{request.Instrument.Key}|{request.Interval}")));
         var path = Path.Combine(directory, key + ".json");
-        var data = File.Exists(path) ? Json.Read<MarketDataset>(path) : new MarketDataset { Provider = provider.Name, Version = request.Version, Interval = request.Interval, Sessions = sessions.ToList() };
+        // Reuse old hashed entries by identity; their obsolete revision metadata is ignored when read.
+        if (!File.Exists(path))
+        {
+            var matches = Directory.EnumerateFiles(directory, "*.json").Where(candidate =>
+            {
+                var entry = Json.Read<MarketDataset>(candidate);
+                return entry.Provider == provider.Name && entry.Interval == request.Interval && entry.Bars.Count > 0 &&
+                    entry.Bars.All(b => b.Instrument == request.Instrument);
+            }).ToArray();
+            if (matches.Length > 1) throw new InvalidDataException("Multiple cache files contain this provider/instrument/interval. Consolidate them before downloading more history.");
+            if (matches.Length == 1) path = matches[0];
+        }
+        var data = File.Exists(path) ? Json.Read<MarketDataset>(path) : new MarketDataset { Provider = provider.Name, Interval = request.Interval, Sessions = sessions.ToList() };
         if (data.Bars.Count > 0) DatasetValidator.Validate(data);
         if (data.Interval != request.Interval || data.Bars.Any(b => b.Instrument != request.Instrument))
             throw new InvalidDataException("Cached instrument or interval does not match the request.");
@@ -167,6 +229,7 @@ public sealed class DataCache(string directory)
         foreach (var gap in ranges)
         {
             var fetched = await provider.FetchAsync(request with { Start = gap.Open, End = gap.Close }, cancellationToken);
+            DatasetValidator.RequireCoverage(fetched with { Provider = provider.Name, Sessions = sessions.ToList() }, request.Instrument, gap.Open, gap.Close);
             DatasetValidator.Validate(fetched);
             if (fetched.Interval != request.Interval || fetched.Bars.Any(b => b.Instrument != request.Instrument))
                 throw new InvalidDataException("Provider returned a different instrument or interval.");

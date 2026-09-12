@@ -7,13 +7,12 @@ namespace Citrus.Desktop;
 /// <summary>Downloads provider history and manages normalized datasets in a chosen local library.</summary>
 internal sealed class HistoricalDataForm : Form
 {
-    private readonly TextBox folder = new() { Dock = DockStyle.Fill, AccessibleName = "Historical data folder" };
+    private readonly TextBox folder = new() { Dock = DockStyle.Fill, ReadOnly = true, AccessibleName = "Historical data folder" };
     private readonly ComboBox provider = Choice("Provider", "Alpaca", "Hyperliquid");
     private readonly ComboBox feed = Choice("Alpaca feed", "iex", "sip");
     private readonly ComboBox interval = Choice("Bar interval", "1d", "1h");
     private readonly TextBox symbol = new() { Text = "SPY", Dock = DockStyle.Fill, AccessibleName = "Symbol" };
     private readonly TextBox venue = new() { Text = "US", Dock = DockStyle.Fill, AccessibleName = "Venue" };
-    private readonly TextBox version = new() { Text = "1", Dock = DockStyle.Fill, AccessibleName = "Data version" };
     private readonly DateTimePicker start = DateField("Start date UTC", DateTime.UtcNow.Date.AddMonths(-1));
     private readonly DateTimePicker end = DateField("End date UTC exclusive", DateTime.UtcNow.Date);
     private readonly DataGridView grid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
@@ -40,16 +39,16 @@ internal sealed class HistoricalDataForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-        var location = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
-        location.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95)); location.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); location.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95));
+        var location = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
+        location.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95)); location.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         location.Controls.Add(new Label { Text = "Local folder", AutoSize = true }, 0, 0); location.Controls.Add(folder, 1, 0);
-        location.Controls.Add(Button("Browse...", Browse), 2, 0); layout.Controls.Add(location, 0, 0);
+        layout.Controls.Add(location, 0, 0);
         var fields = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 4 };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130)); fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 165)); fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         AddField(fields, "Provider", provider, 0, 0); AddField(fields, "Alpaca feed", feed, 2, 0);
         AddField(fields, "Symbol", symbol, 0, 1); AddField(fields, "Venue", venue, 2, 1);
-        AddField(fields, "Bar interval", interval, 0, 2); AddField(fields, "Data version", version, 2, 2);
+        AddField(fields, "Bar interval", interval, 0, 2);
         AddField(fields, "Start date (UTC)", start, 0, 3); AddField(fields, "End date (exclusive)", end, 2, 3);
         layout.Controls.Add(fields, 0, 1);
         var download = new FlowLayoutPanel { Dock = DockStyle.Fill };
@@ -60,7 +59,7 @@ internal sealed class HistoricalDataForm : Form
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill };
         actions.Controls.Add(Button("Refresh", () => _ = RefreshAsync()));
         actions.Controls.Add(Button("Open folder", () => { Directory.CreateDirectory(LibraryPath()); Process.Start(new ProcessStartInfo(LibraryPath()) { UseShellExecute = true }); }));
-        actions.Controls.Add(Button("Export selected...", Export)); actions.Controls.Add(Button("Copy path", () => Clipboard.SetText(Selected().Path)));
+        actions.Controls.Add(Button("Export selected...", Export));
         actions.Controls.Add(Button("Delete selected...", Delete));
         layout.Controls.Add(actions, 0, 5); layout.Controls.Add(status, 0, 6); Controls.Add(layout);
         commands.Add(location); commands.Add(fields);
@@ -98,13 +97,6 @@ internal sealed class HistoricalDataForm : Form
     /// <summary>Resolves the current folder, rejecting an empty input.</summary>
     private string LibraryPath() => string.IsNullOrWhiteSpace(folder.Text) ? throw new InvalidOperationException("Choose a local data folder.") : Path.GetFullPath(folder.Text.Trim());
 
-    /// <summary>Chooses a library folder and refreshes its contents.</summary>
-    private void Browse()
-    {
-        using var dialog = new FolderBrowserDialog { Description = "Choose historical data library", UseDescriptionForTitle = true };
-        if (dialog.ShowDialog(this) == DialogResult.OK) { folder.Text = dialog.SelectedPath; _ = RefreshAsync(); }
-    }
-
     /// <summary>Returns the selected dataset or explains why an action cannot proceed.</summary>
     private HistoricalDataEntry Selected() => grid.CurrentRow?.DataBoundItem as HistoricalDataEntry ?? throw new InvalidOperationException("Select a local dataset first.");
 
@@ -140,17 +132,17 @@ internal sealed class HistoricalDataForm : Form
         try
         {
             var directory = LibraryPath();
-            if (string.IsNullOrWhiteSpace(symbol.Text) || string.IsNullOrWhiteSpace(venue.Text) || string.IsNullOrWhiteSpace(version.Text)) throw new InvalidOperationException("Symbol, venue and data version are required.");
+            if (string.IsNullOrWhiteSpace(symbol.Text) || string.IsNullOrWhiteSpace(venue.Text)) throw new InvalidOperationException("Symbol and venue are required.");
             var request = new DataRequest(new Instrument(venue.Text.Trim(), provider.SelectedIndex == 0 ? AssetClass.Equity : AssetClass.LinearPerpetual, symbol.Text.Trim().ToUpperInvariant()),
-                interval.SelectedIndex == 0 ? BarInterval.Daily : BarInterval.Hourly, new DateTimeOffset(start.Value.Date, TimeSpan.Zero), new DateTimeOffset(end.Value.Date, TimeSpan.Zero), version.Text.Trim());
+                interval.SelectedIndex == 0 ? BarInterval.Daily : BarInterval.Hourly, new DateTimeOffset(start.Value.Date, TimeSpan.Zero), new DateTimeOffset(end.Value.Date, TimeSpan.Zero));
             if (request.Start >= request.End || request.End > DateTimeOffset.UtcNow) throw new InvalidOperationException("Choose a start before the exclusive end, with the end no later than today.");
             var providerName = provider.Text; var feedName = feed.Text;
             SetBusy(true); cancel.Enabled = true; status.Text = "Downloading and validating history...";
             var token = operation!.Token;
             await Task.Run(() => HistoricalDataLibrary.DownloadAsync(directory, providerName, feedName, request, token));
-            await ScanAsync(directory); status.Text = "Download complete. Select the dataset to export it or copy its path into a run configuration.";
+            await ScanAsync(directory); status.Text = "Download complete. Backtests now read matching history directly from the main cache.";
         }
-        catch (OperationCanceledException) { status.Text = "Download cancelled."; }
+        catch (OperationCanceledException) when (operation?.IsCancellationRequested == true) { status.Text = "Download cancelled."; }
         catch (Exception error) { ShowError(error); }
         finally { SetBusy(false); }
     }
@@ -167,7 +159,7 @@ internal sealed class HistoricalDataForm : Form
     private void Delete()
     {
         var entry = Selected();
-        if (MessageBox.Show(this, "Permanently delete this local dataset? Runs using it will need another data file.\n\n" + entry.Path, "Delete historical data", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (MessageBox.Show(this, "Permanently delete this cached dataset? Backtests requiring it will fail until matching history is restored.\n\n" + entry.Path, "Delete historical data", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         File.Delete(entry.Path); _ = RefreshAsync();
     }
 
@@ -183,9 +175,8 @@ internal sealed class HistoricalDataForm : Form
     /// <summary>Shows actionable local validation errors without echoing arbitrary provider diagnostics.</summary>
     private void ShowError(Exception error)
     {
-        var message = error is InvalidOperationException ? error.Message : "Operation failed. Check the folder permissions, dataset format, network connection and provider access. No completed download was reported.";
-        status.Text = message;
-        MessageBox.Show(this, message, "Historical data", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        status.Text = ErrorDialog.Redact(error.Message);
+        ErrorDialog.Show(this, "Historical data operation failed", error);
     }
 }
 

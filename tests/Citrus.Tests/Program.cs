@@ -29,20 +29,49 @@ BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOpt
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
+Test("Strategy folders select named backtests and resolve paths independently of the working directory", () =>
+{
+    var root = Temporary();
+    Directory.CreateDirectory(Path.Combine(root, "Backtests"));
+    File.WriteAllText(Path.Combine(root, "Strategy.cs"), "// fixture");
+    var first = Path.Combine(root, "Backtests", "Default.json");
+    Json.Write(first, new RunConfiguration { Output = "Results/Default" });
+    True(!File.ReadAllText(first).Contains("\"strategy\""));
+    Equal(first, StrategyFolder.ConfigurationPath(root));
+    Equal(Path.Combine(root, "Strategy.cs"), StrategyFolder.Source(first, StrategyFolder.Read(first)));
+    Equal(Path.Combine(root, "Results", "Default"), StrategyFolder.Resolve(first, "Results/Default"));
+    var second = Path.Combine(root, "Backtests", "HigherCosts.json");
+    Json.Write(second, new RunConfiguration { InitialCash = 2500 });
+    Equal(second, StrategyFolder.ConfigurationPath(root, "HigherCosts"));
+    Equal(2500m, StrategyFolder.Read(second).InitialCash);
+    Throws<FileNotFoundException>(() => StrategyFolder.ConfigurationPath(root, "../missing"));
+    File.Delete(first);
+    Equal(second, StrategyFolder.ConfigurationPath(root));
+    Json.Write(Path.Combine(root, "Backtests", "Other.json"), new RunConfiguration());
+    Throws<InvalidDataException>(() => StrategyFolder.ConfigurationPath(root));
+    Json.Write(second, new RunConfiguration { Strategy = "elsewhere.cs" });
+    Throws<InvalidDataException>(() => StrategyFolder.Read(second));
+    var legacy = Path.Combine(root, "run.json");
+    Json.Write(legacy, new RunConfiguration { Strategy = "Old.cs" });
+    Equal(Path.Combine(root, "Old.cs"), StrategyFolder.Source(legacy, StrategyFolder.Read(legacy)));
+});
+
 Test("Global settings round trip, replace and reject malformed files without exposing values", () =>
 {
     var path = Path.Combine(Temporary(), "profile", "config.json");
     Equal("", GlobalConfiguration.Load(path).AlpacaApiKeyId);
     True(!File.Exists(path));
-    new GlobalConfiguration { AlpacaApiKeyId = "fixture-key", AlpacaApiSecretKey = "fixture-secret" }.Save(path);
+    var historical = Path.Combine(Temporary(), "history");
+    new GlobalConfiguration { AlpacaApiKeyId = "fixture-key", AlpacaApiSecretKey = "fixture-secret", HistoricalDataDirectory = historical }.Save(path);
     var restored = GlobalConfiguration.Load(path);
+    Equal(Path.GetFullPath(historical), restored.ResolveHistoricalDataDirectory(_ => null));
     Equal(("fixture-key", "fixture-secret"), restored.ResolveAlpacaCredentials(_ => null));
     Equal(("override", "fixture-secret"), restored.ResolveAlpacaCredentials(name => name == "APCA_API_KEY_ID" ? "override" : ""));
     restored.AlpacaApiSecretKey = "";
     restored.Save(path);
     Throws<InvalidOperationException>(() => GlobalConfiguration.Load(path).ResolveAlpacaCredentials(_ => null));
     Equal(1, Directory.GetFiles(Path.GetDirectoryName(path)!).Length);
-    foreach (var invalid in new[] { "null", "{", "{\"schemaVersion\":2}", "{\"alpacaApiKeyId\":null}", "{\"fixture-secret\":123}" })
+    foreach (var invalid in new[] { "null", "{", "{\"schemaVersion\":2}", "{\"alpacaApiKeyId\":null}", "{\"historicalDataDirectory\":null}", "{\"fixture-secret\":123}" })
     {
         File.WriteAllText(path, invalid);
         Throws<InvalidDataException>(() => GlobalConfiguration.Load(path));
@@ -203,6 +232,49 @@ Test("Cache fetches only missing coverage and reuses valid bars", () =>
     cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
     cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
     Equal(2, provider.Requests.Count); Equal(start.AddHours(2), provider.Requests[1].Start);
+});
+Test("Backtest data is assembled read-only from the main historical cache", () =>
+{
+    var directory = Temporary();
+    var btc = Data(100, 110, 120) with { Provider = "fixture-a" };
+    var eth = btc with { Provider = "fixture-b", Bars = btc.Bars.Select(b => b with { Instrument = instrument with { Symbol = "ETH" } }).ToList() };
+    Json.Write(Path.Combine(directory, "btc.json"), btc);
+    Json.Write(Path.Combine(directory, "eth.json"), eth);
+    Json.Write(Path.Combine(directory, "daily.json"), BrownianGenerator.Generate(instrument, BarInterval.Daily, start, 2, 3));
+    var loaded = DataCache.Load(directory, BarInterval.Hourly, start.AddHours(1), start.AddHours(3));
+    Equal(4, loaded.Bars.Count); Equal(2, loaded.Bars.Select(b => b.Instrument).Distinct().Count());
+    True(loaded.Bars.All(b => b.OpenTime >= start.AddHours(1) && b.CloseTime <= start.AddHours(3)));
+    Equal(3, Directory.GetFiles(directory).Length);
+    Throws<InvalidDataException>(() => DataCache.Load(directory, BarInterval.Hourly, start.AddYears(10), start.AddYears(11)));
+});
+Test("Legacy cache data is reused without data revisions", () =>
+{
+    var directory = Temporary(); var path = Path.Combine(directory, "old-hash.json");
+    var data = Data(100, 110) with { Provider = "fixture" };
+    var node = JsonSerializer.SerializeToNode(data, Json.Options)!;
+    node["version"] = "obsolete";
+    File.WriteAllText(path, node.ToJsonString());
+    var provider = new FixtureProvider(data);
+    new DataCache(directory).GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(2)), []).GetAwaiter().GetResult();
+    Equal(0, provider.Requests.Count); Equal(1, Directory.GetFiles(directory).Length);
+    True(!File.ReadAllText(path).Contains("\"version\""));
+    Equal(2, DataCache.Load(directory, BarInterval.Hourly).Bars.Count);
+});
+Test("Missing history reports feed and dates and preserves cached coverage", () =>
+{
+    var directory = Temporary(); var provider = new FixtureProvider(Data(100)); var cache = new DataCache(directory);
+    cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(1)), []).GetAwaiter().GetResult();
+    var path = Directory.GetFiles(directory).Single(); var before = File.ReadAllText(path);
+    try
+    {
+        cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
+        throw new Exception("Missing history unexpectedly succeeded.");
+    }
+    catch (InvalidDataException error)
+    {
+        True(error.Message.Contains("fixture") && error.Message.Contains("2024-01-01 01:00") && error.Message.Contains("Missing 2"));
+    }
+    Equal(before, File.ReadAllText(path));
 });
 Test("Provider errors do not expose response secrets", () =>
 {
@@ -388,6 +460,8 @@ Test("Risk checks value limit fills against current marks", () =>
 Test("Malformed configuration fields are rejected", () =>
 {
     Throws<JsonException>(() => JsonSerializer.Deserialize<RunConfiguration>("{\"initialCahs\":12}", Json.Options));
+    Throws<JsonException>(() => JsonSerializer.Deserialize<RunConfiguration>("{\"data\":\"dataset.json\"}", Json.Options));
+    True(!JsonSerializer.Serialize(Config(), Json.Options).Contains("\"data\"", StringComparison.OrdinalIgnoreCase));
 });
 Test("Direct buy and sell quantities trade independently of capital weights", () =>
 {
@@ -481,7 +555,7 @@ if (args.Contains("--benchmark"))
 // Build November/December 2024 exchange sessions with holidays, DST and shortened holiday auctions.
 MarketDataset PaydayData(decimal price = 100m)
 {
-    var schb = new Instrument("alpaca", AssetClass.Equity, "SCHB");
+    var schb = new Instrument("US", AssetClass.Equity, "SCHB");
     var sessions = new List<MarketSession>();
     var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
     for (var date = new DateTime(2024, 11, 1); date < new DateTime(2025, 1, 1); date = date.AddDays(1))

@@ -3,10 +3,16 @@
   "feed": "iex",
   "cache": "../artifacts/cache",
   "request": {
-    "instrument": { "venue": "alpaca", "assetClass": "Equity", "symbol": "AAPL" },
-    "interval": { "name": "1d", "minutes": 1440 },
+    "instrument": {
+      "venue": "alpaca",
+      "assetClass": "Equity",
+      "symbol": "AAPL"
+    },
+    "interval": {
+      "name": "1d",
+      "minutes": 1440
+    },
     "start": "2024-03-01T00:00:00Z",
-    "end": "2024-03-09T00:00:00Z",
-    "version": "2024-research-v1"
+    "end": "2024-03-09T00:00:00Z"
   }
 }

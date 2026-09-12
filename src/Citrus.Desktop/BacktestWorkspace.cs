@@ -18,18 +18,20 @@ internal static class BacktestWorkspace
 
     /// <summary>Resolves a configured path relative to its run file, never the application directory.</summary>
     internal static string Resolve(string configurationPath, string path) =>
-        Path.GetFullPath(path, Path.GetDirectoryName(Path.GetFullPath(configurationPath))!);
+        StrategyFolder.Resolve(configurationPath, path);
 
     /// <summary>Loads a market dataset, compiles trusted source, executes, and exports a completed backtest.</summary>
-    internal static Task<WorkspaceResult> RunAsync(string configurationPath, RunConfiguration config)
+    internal static Task<WorkspaceResult> RunAsync(string configurationPath, RunConfiguration config, string? historicalDataDirectory = null)
     {
-        if (string.IsNullOrWhiteSpace(config.Strategy) || string.IsNullOrWhiteSpace(config.Output))
-            throw new ArgumentException("Strategy and output paths are required.");
-        var strategy = Resolve(configurationPath, config.Strategy);
+        if (string.IsNullOrWhiteSpace(config.Output))
+            throw new ArgumentException("An output path is required.");
+        var strategy = StrategyFolder.Source(configurationPath, config);
         var output = Resolve(configurationPath, config.Output);
-        if (string.IsNullOrWhiteSpace(config.Data)) throw new ArgumentException("A market dataset path is required.");
-        var dataPath = Resolve(configurationPath, config.Data);
-        var data = Json.Read<MarketDataset>(dataPath);
+        var data = DataCache.Load(historicalDataDirectory ?? GlobalConfiguration.Load().ResolveHistoricalDataDirectory(),
+            config.Interval, config.Start, config.End);
+        Directory.CreateDirectory(output);
+        var dataPath = Path.Combine(output, "historical-data.json");
+        Json.Write(dataPath, data);
         using var compiled = CompiledStrategy.Load(strategy, config.References.Select(p => Resolve(configurationPath, p)));
         var result = new BacktestEngine().Run(compiled.Strategy, data, config);
         Reports.Export(output, result, config, data, strategy, dataPath, compiled.DependencyHashes);
@@ -38,11 +40,12 @@ internal static class BacktestWorkspace
         return Task.FromResult(new WorkspaceResult(result, metrics, output));
     }
 
-    /// <summary>Creates a self-contained offline example in a new child folder, without overwriting user files.</summary>
-    internal static string CreateExample(string parent)
+    /// <summary>Creates an offline example workspace and refreshes its synthetic prices in the main cache.</summary>
+    internal static string CreateExample(string parent, string? historicalDataDirectory = null)
     {
         var root = Path.Combine(parent, "Citrus-example-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(root);
+
         File.WriteAllText(Path.Combine(root, "Strategy.cs"), """
             using System.Collections.Generic;
             using Citrus.Trading;
@@ -50,6 +53,8 @@ internal static class BacktestWorkspace
             /// <summary>Buys one unit of the example instrument after the first completed bar.</summary>
             public sealed class ExampleStrategy : IStrategy
             {
+                private static readonly Instrument Instrument = new("citrus-example", AssetClass.LinearPerpetual, "BTC");
+
                 /// <summary>Allocates starting capital to the holding strategy.</summary>
                 public void OnStart(IStrategyContext context) => context.Register("hold", 1m);
 
@@ -57,16 +62,19 @@ internal static class BacktestWorkspace
                 public void OnBar(IStrategyContext context, IReadOnlyList<Bar> bars)
                 {
                     foreach (var bar in bars)
-                        if (context.History(bar.Instrument, 2).Count == 1)
-                            context.Buy("hold", bar.Instrument, 1m);
+                        if (bar.Instrument == Instrument && context.History(Instrument, 2).Count == 1)
+                            context.Buy("hold", Instrument, 1m);
                 }
             }
             """);
-        Json.Write(Path.Combine(root, "data.json"), BrownianGenerator.Generate(
-            new Instrument("hyperliquid", AssetClass.LinearPerpetual, "BTC"), BarInterval.Daily,
+        var cache = historicalDataDirectory ?? GlobalConfiguration.Load().ResolveHistoricalDataDirectory();
+        Directory.CreateDirectory(cache);
+        Json.Write(Path.Combine(cache, "desktop-example.json"), BrownianGenerator.Generate(
+            new Instrument("citrus-example", AssetClass.LinearPerpetual, "BTC"), BarInterval.Daily,
             new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero), 365, 42, 40000, 0.05, 0.5));
-        var path = Path.Combine(root, "run.json");
-        Json.Write(path, new RunConfiguration { Strategy = "Strategy.cs", Data = "data.json", Output = "results" });
+        Directory.CreateDirectory(Path.Combine(root, "Backtests"));
+        var path = Path.Combine(root, "Backtests", "Default.json");
+        Json.Write(path, new RunConfiguration { Interval = BarInterval.Daily, Output = "Results/Default" });
         return path;
     }
 }

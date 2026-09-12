@@ -4,7 +4,7 @@ using Citrus.Trading;
 public sealed class PaydaySeasonality : InstrumentStrategy
 {
     /// <summary>Allocates the strategy account to SCHB; each entry uses a fixed $810 notional.</summary>
-    public PaydaySeasonality() : base(new Instrument("alpaca", AssetClass.Equity, "SCHB"), "PaydaySeason") { }
+    public PaydaySeasonality() : base(new Instrument("US", AssetClass.Equity, "SCHB"), "PaydaySeason") { }
 
     /// <summary>Signals after sessions 7, 11, 15 and the penultimate session to fill on 8, 12, 16 and month end.</summary>
     protected override void OnBar(InstrumentContext market, Bar bar)

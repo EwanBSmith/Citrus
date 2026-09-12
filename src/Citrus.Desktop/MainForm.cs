@@ -15,13 +15,14 @@ internal sealed class MainForm : Form
     private readonly StrategyEditor strategyEditor = new();
     private readonly ConfigurationEditor configEditor = new();
     private readonly TextBox log = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false };
-    private readonly ToolStripStatusLabel status = new("Ready — open a run configuration or create an example") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly ToolStripStatusLabel status = new("Ready — open a strategy folder or create an example") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly ToolStripProgressBar progress = new() { Visible = false, Style = ProgressBarStyle.Marquee };
     private readonly EquityChart chart = new();
     private readonly Label metrics = new() { Dock = DockStyle.Top, Height = 65, Padding = new Padding(12), Text = "No completed backtest", BackColor = SystemColors.ControlLightLight };
     private readonly TabPage strategyPage;
     private readonly TabPage configPage;
     private readonly Dictionary<string, DataGridView> grids = [];
+    private readonly string? historicalDataDirectory;
     private string? configPath;
     private string? strategyPath;
     private string? outputPath;
@@ -29,10 +30,12 @@ internal sealed class MainForm : Form
     private bool configDirty;
     private bool loading;
     private bool busy;
+    private readonly ToolStripComboBox backtests = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, AccessibleName = "Backtest configuration" };
 
     /// <summary>Builds the native menu, toolbar, split workspace, results tabs, and status area.</summary>
-    internal MainForm(string? initialPath = null)
+    internal MainForm(string? initialPath = null, string? historicalDataDirectory = null)
     {
+        this.historicalDataDirectory = historicalDataDirectory;
         Text = "Citrus — Backtesting Workbench";
         Font = new Font("Segoe UI", 9F);
         Size = new Size(1280, 850);
@@ -41,7 +44,7 @@ internal sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         Icon = SystemIcons.Application;
         var file = new ToolStripMenuItem("&File");
-        file.DropDownItems.Add(Command("&Open run...", Keys.Control | Keys.O, Open));
+        file.DropDownItems.Add(Command("&Open strategy...", Keys.Control | Keys.O, Open));
         file.DropDownItems.Add(Command("Create &example...", Keys.None, CreateExample));
         file.DropDownItems.Add(Command("&Save all", Keys.Control | Keys.S, SaveAll));
         file.DropDownItems.Add(new ToolStripSeparator());
@@ -72,6 +75,18 @@ internal sealed class MainForm : Form
         toolbar.Items.Add(new ToolStripSeparator());
         AddButton("Results folder", OpenResults);
         AddButton("Historical data...", OpenHistoricalData);
+        toolbar.Items.Add(new ToolStripLabel("Backtest:"));
+        toolbar.Items.Add(backtests);
+        AddButton("Copy backtest...", CopyBacktest);
+        backtests.SelectedIndexChanged += (_, _) =>
+        {
+            if (loading || configPath is null || backtests.SelectedItem is not string name) return;
+            Guard(() =>
+            {
+                try { LoadConfiguration(StrategyFolder.ConfigurationPath(StrategyFolder.Root(configPath)!, name)); }
+                finally { RefreshBacktests(); }
+            });
+        };
 
         var workspace = new SplitContainer { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel1, Size = new Size(1200, 700), SplitterDistance = 210, Panel1MinSize = 160 };
         workspace.Panel1.Controls.Add(navigation);
@@ -85,7 +100,7 @@ internal sealed class MainForm : Form
         strategyPage = AddPage("Strategy", strategyEditor);
         strategyPage.Controls.Add(Hint("C# strategy • Ctrl+Space: complete • Ctrl+Shift+Space: parameters • F6: validate • F5: run"));
         configPage = AddPage("Configuration", configEditor);
-        configPage.Controls.Add(Hint("Paths are relative to the run file. Rates and margins use fractions: 0.05 = 5%."));
+        configPage.Controls.Add(Hint("Folder backtest paths are relative to the strategy folder. Rates and margins use fractions: 0.05 = 5%."));
         var overview = AddPage("Overview", chart);
         overview.Controls.Add(metrics);
         foreach (var name in new[] { "Orders", "Fills", "Positions", "Costs", "Equity", "Attribution" })
@@ -121,8 +136,39 @@ internal sealed class MainForm : Form
     /// <summary>Opens the historical download and local dataset management dialog.</summary>
     private void OpenHistoricalData()
     {
-        using var dialog = new HistoricalDataForm();
+        using var dialog = new HistoricalDataForm(historicalDataDirectory);
         dialog.ShowDialog(this);
+    }
+
+    /// <summary>Lists sibling backtests and restores the active selection without triggering navigation.</summary>
+    private void RefreshBacktests()
+    {
+        loading = true;
+        try
+        {
+            backtests.Items.Clear();
+            var root = configPath is null ? null : StrategyFolder.Root(configPath);
+            backtests.Enabled = root is not null;
+            if (root is null) return;
+            backtests.Items.AddRange(StrategyFolder.Backtests(root).Select(p => (object)Path.GetFileNameWithoutExtension(p)).ToArray());
+            backtests.SelectedItem = Path.GetFileNameWithoutExtension(configPath);
+        }
+        finally { loading = false; }
+    }
+
+    /// <summary>Copies current saved settings to a named backtest with its own result directory.</summary>
+    private void CopyBacktest()
+    {
+        if (configPath is null || StrategyFolder.Root(configPath) is not string root)
+            throw new InvalidOperationException("Open a strategy folder first.");
+        using var dialog = new SaveFileDialog { Title = "Copy backtest", Filter = "Backtest (*.json)|*.json", InitialDirectory = Path.Combine(root, "Backtests"), FileName = "NewBacktest.json" };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        if (!string.Equals(Path.GetDirectoryName(dialog.FileName), Path.Combine(root, "Backtests"), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Save the backtest inside this strategy's Backtests folder.");
+        SaveAll();
+        var configuration = configEditor.ReadConfiguration() with { Strategy = null, Output = "Results/" + Path.GetFileNameWithoutExtension(dialog.FileName) };
+        Citrus.Data.Json.Write(dialog.FileName, configuration);
+        LoadConfiguration(dialog.FileName);
     }
 
     /// <summary>Creates the compact explanatory strip above an editor or result table.</summary>
@@ -159,23 +205,23 @@ internal sealed class MainForm : Form
     /// <summary>Prompts for an existing run configuration.</summary>
     private void Open()
     {
-        using var dialog = new OpenFileDialog { Filter = "Run configuration (*.json)|*.json", Title = "Open Citrus run configuration" };
-        if (dialog.ShowDialog(this) == DialogResult.OK) LoadConfiguration(dialog.FileName);
+        using var dialog = new FolderBrowserDialog { Description = "Open Citrus strategy folder", UseDescriptionForTitle = true };
+        if (dialog.ShowDialog(this) == DialogResult.OK) LoadConfiguration(dialog.SelectedPath);
     }
 
     /// <summary>Loads both documents only after reads succeed and outstanding edits are resolved.</summary>
     internal void LoadConfiguration(string path)
     {
-        var fullPath = Path.GetFullPath(path);
+        var fullPath = StrategyFolder.ConfigurationPath(path);
         var text = File.ReadAllText(fullPath);
-        var configuration = BacktestWorkspace.Parse(text);
-        var sourcePath = BacktestWorkspace.Resolve(fullPath, configuration.Strategy);
+        var configuration = StrategyFolder.Read(fullPath);
+        var sourcePath = StrategyFolder.Source(fullPath, configuration);
         var source = File.ReadAllText(sourcePath);
         if (!ConfirmEdits()) return;
         // Re-read after saving in case the selected run is the currently edited document.
         text = File.ReadAllText(fullPath);
-        configuration = BacktestWorkspace.Parse(text);
-        sourcePath = BacktestWorkspace.Resolve(fullPath, configuration.Strategy);
+        configuration = StrategyFolder.Read(fullPath);
+        sourcePath = StrategyFolder.Source(fullPath, configuration);
         source = File.ReadAllText(sourcePath);
         loading = true;
         try
@@ -184,7 +230,7 @@ internal sealed class MainForm : Form
             strategyEditor.LoadSource(source, sourcePath, configuration.References.Select(p => BacktestWorkspace.Resolve(fullPath, p)).ToArray());
         }
         finally { loading = false; }
-        configPath = fullPath; strategyPath = sourcePath;
+        configPath = fullPath; strategyPath = sourcePath; RefreshBacktests();
         configDirty = strategyDirty = false;
         ClearResults(); UpdateTitle();
         status.Text = fullPath;
@@ -195,7 +241,7 @@ internal sealed class MainForm : Form
     private void CreateExample()
     {
         using var dialog = new FolderBrowserDialog { Description = "Choose a parent folder for a new self-contained Citrus example", UseDescriptionForTitle = true };
-        if (dialog.ShowDialog(this) == DialogResult.OK) LoadConfiguration(BacktestWorkspace.CreateExample(dialog.SelectedPath));
+        if (dialog.ShowDialog(this) == DialogResult.OK) LoadConfiguration(BacktestWorkspace.CreateExample(dialog.SelectedPath, historicalDataDirectory));
     }
 
     /// <summary>Saves valid configuration JSON and the source document currently shown in the editor.</summary>
@@ -223,7 +269,7 @@ internal sealed class MainForm : Form
     {
         SaveAll();
         var configuration = configEditor.ReadConfiguration();
-        var path = BacktestWorkspace.Resolve(configPath!, configuration.Strategy);
+        var path = StrategyFolder.Source(configPath!, configuration);
         if (!string.Equals(path, strategyPath, StringComparison.OrdinalIgnoreCase))
         {
             var text = File.ReadAllText(path);
@@ -244,7 +290,7 @@ internal sealed class MainForm : Form
     {
         if (configPath is null) return;
         // Resolve and validate file names on the language service's background thread, including partially typed paths.
-        strategyEditor.SetReferences(configEditor.ReadReferences().Select(p => Path.Combine(Path.GetDirectoryName(configPath)!, p)).ToArray());
+        strategyEditor.SetReferences(configEditor.ReadReferences().Select(p => StrategyFolder.Resolve(configPath, p)).ToArray());
     }
 
     /// <summary>Compiles the saved strategy away from the UI thread and reports compiler diagnostics.</summary>
@@ -258,7 +304,7 @@ internal sealed class MainForm : Form
             SetBusy(true, "Validating strategy...");
             var name = await Task.Run(() =>
             {
-                using var compiled = CompiledStrategy.Load(BacktestWorkspace.Resolve(path, config.Strategy), config.References.Select(p => BacktestWorkspace.Resolve(path, p)));
+                using var compiled = CompiledStrategy.Load(StrategyFolder.Source(path, config), config.References.Select(p => BacktestWorkspace.Resolve(path, p)));
                 return compiled.Strategy.GetType().Name;
             });
             AppendLog("Valid strategy: " + name); status.Text = "Strategy validation succeeded";
@@ -278,7 +324,7 @@ internal sealed class MainForm : Form
             ClearResults();
             SetBusy(true, "Running backtest — preparing data, compiling, simulating and exporting...");
             var watch = Stopwatch.StartNew();
-            var completed = await Task.Run(() => BacktestWorkspace.RunAsync(path, config));
+            var completed = await Task.Run(() => BacktestWorkspace.RunAsync(path, config, historicalDataDirectory));
             Present(completed);
             status.Text = $"Completed in {watch.Elapsed.TotalSeconds:N1}s — {completed.Output}";
             AppendLog(status.Text);
@@ -367,7 +413,7 @@ internal sealed class MainForm : Form
         strategyPage.Text = "Strategy" + (strategyDirty ? " *" : "");
         strategyPage.ToolTipText = strategyPath;
         configPage.Text = "Configuration" + (configDirty ? " *" : "");
-        Text = $"{(configPath is null ? "Citrus" : Path.GetFileName(configPath) + " — Citrus")} — Backtesting Workbench";
+        Text = $"{(configPath is null ? "Citrus" : (StrategyFolder.Root(configPath) is string folder ? Path.GetFileName(folder) + " / " + Path.GetFileNameWithoutExtension(configPath) : Path.GetFileName(configPath)) + " — Citrus")} — Backtesting Workbench";
     }
 
     /// <summary>Appends a timestamped diagnostic line and scrolls it into view.</summary>
@@ -376,12 +422,9 @@ internal sealed class MainForm : Form
     /// <summary>Redacts configured credentials from arbitrary strategy errors before presenting them.</summary>
     private void ShowError(Exception exception)
     {
-        var message = exception.Message;
-        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
-            if (entry.Key.ToString() is { } key && (key.Contains("KEY", StringComparison.OrdinalIgnoreCase) || key.Contains("SECRET", StringComparison.OrdinalIgnoreCase) || key.Contains("TOKEN", StringComparison.OrdinalIgnoreCase)) && entry.Value?.ToString() is { Length: > 3 } value)
-                message = message.Replace(value, "[REDACTED]", StringComparison.Ordinal);
+        var message = ErrorDialog.Redact(exception.Message);
         status.Text = "Operation failed — see execution log"; AppendLog(message);
-        MessageBox.Show(this, message, "Citrus", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        ErrorDialog.Show(this, "Citrus operation failed", exception);
     }
 
     /// <summary>Prevents closing mid-run and preserves unsaved source/configuration edits.</summary>

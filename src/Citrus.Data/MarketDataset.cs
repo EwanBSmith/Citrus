@@ -9,8 +9,6 @@ public sealed record MarketDataset
     public int SchemaVersion { get; init; } = 1;
     /// <summary>Gets the source identifier used for provenance.</summary>
     public string Provider { get; init; } = "import";
-    /// <summary>Gets the explicit data revision used for provenance and provider cache requests.</summary>
-    public string Version { get; init; } = "1";
     /// <summary>Gets the bar interval shared by the dataset.</summary>
     public BarInterval Interval { get; init; } = BarInterval.Daily;
     /// <summary>Gets bars ordered chronologically within each instrument.</summary>

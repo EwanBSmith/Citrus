@@ -26,7 +26,8 @@ internal sealed class ConfigurationEditor : UserControl
         var layout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Padding = new Padding(16), BackColor = SystemColors.Window };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         Controls.Add(layout);
-        AddGroup(layout, "Files and output", typeof(RunConfiguration), "Strategy", "Data", "Output", "References");
+        AddGroup(layout, "Files and output", typeof(RunConfiguration), "Output", "References");
+        AddGroup(layout, "Historical data", typeof(RunConfiguration), "Start", "End", "Interval");
         AddGroup(layout, "Capital and reproducibility", typeof(RunConfiguration), "InitialCash", "Seed", "RiskFreeRate");
         AddGroup(layout, "Execution costs and borrowing", typeof(SimulationOptions), "CommissionFixed", "CommissionPerUnit", "SpreadBps", "SlippageBps", "RejectionProbability", "AnnualBorrowRate", "ShortsAvailable");
         AddGroup(layout, "Margin requirements", typeof(SimulationOptions), "EquityInitialMargin", "EquityMaintenanceMargin", "PerpetualInitialMargin", "PerpetualMaintenanceMargin");
@@ -197,7 +198,7 @@ internal sealed class ConfigurationEditor : UserControl
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             selected = dialog.FileName;
         }
-        input.Text = ConfigurationPath is null ? selected : Path.GetRelativePath(Path.GetDirectoryName(ConfigurationPath)!, selected);
+        input.Text = ConfigurationPath is null ? selected : Path.GetRelativePath(StrategyFolder.Root(ConfigurationPath) ?? Path.GetDirectoryName(ConfigurationPath)!, selected);
     }
 
     /// <summary>Supplies readable labels with explicit units for rates, prices, and optional fields.</summary>

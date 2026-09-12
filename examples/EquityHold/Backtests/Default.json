@@ -1,8 +1,12 @@
 {
   "schemaVersion": 1,
-  "strategy": "EquityHold.cs",
-  "data": "../artifacts/equity-data.json",
-  "output": "../artifacts/equity-result",
+  "start": "2024-03-08T14:30:00Z",
+  "end": "2024-03-12T20:00:00Z",
+  "interval": {
+    "name": "1d",
+    "minutes": 1440
+  },
+  "output": "../../artifacts/equity-result",
   "initialCash": 10000,
   "seed": 42,
   "simulation": {
