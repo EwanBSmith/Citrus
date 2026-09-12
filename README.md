@@ -14,7 +14,7 @@ dotnet build tests/Citrus.Tests/Citrus.Tests.csproj --no-restore -c Release
 dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore
 ```
 
-These commands work on Windows, macOS, and Linux. The automated test executable returns a nonzero exit code on failure. It uses no external test packages or network calls. `dotnet test` is not the test entry point. Compilation uses Roslyn assemblies supplied with the SDK, copied into the application output. No package downloads are needed. The SDK is required to build; the .NET 10 runtime can run the built CLI.
+These commands work on Windows, macOS, and Linux. The automated test executable returns a nonzero exit code on failure. It uses no external test packages or network calls. `dotnet test` is not the test entry point. Strategy compilation uses the Microsoft.CodeAnalysis.CSharp NuGet package, copied into the application output. Package restore needs network access on the first build. The SDK is required to build; the .NET 10 runtime can run the built CLI.
 
 ## Windows desktop workbench
 
@@ -26,13 +26,32 @@ dotnet build Citrus.slnx -c Release --no-restore
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
 ```
 
-Choose **New example** to create a self-contained offline workspace in a new child folder, or **Open** an existing run JSON. Edit C# on the Strategy tab and the complete run JSON on Configuration. **Save all** (`Ctrl+S`) saves both documents; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports the same reports as the CLI. You can also pass a run JSON path as the application's first argument. Changes to the configured strategy path take effect on validation or execution, which loads that source into the editor after saving the previously displayed source to its original path.
+Choose **New example** to create a self-contained offline workspace in a new child folder, or **Open** an existing run JSON. Edit C# on the Strategy tab and settings in the Configuration form. **Save all** (`Ctrl+S`) saves both documents; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports the same reports as the CLI. You can also pass a run JSON path as the application's first argument. Changes to the configured strategy path take effect on validation or execution, which loads that source into the editor after saving the previously displayed source to its original path.
+
+The Strategy tab uses [Scintilla](https://github.com/desjarlais/Scintilla.NET) with Roslyn C# language services, bundled through NuGet. It provides syntax colours, line numbers, folding, indentation guides, matching and closing brackets, automatic indentation, undo/redo, completion for Citrus APIs and configured assemblies, hover information, and method signatures. Click the gutter to fold a block; **Edit** also offers collapse/expand commands. Editing works offline after restore, without a browser runtime or language server.
+
+Compiler errors and warnings update after a short typing pause, with squiggles and a **Problems** list. Double-click a problem or press Enter on its row to navigate to the source. Live checks analyze unsaved text without saving or executing it. **Validate** additionally loads and constructs the strategy, checking the executable strategy contract. Edited assembly references resolve relative to the run file. Missing or invalid references appear as a code assistance error in the editor status strip.
+
+| Editor command | Shortcut |
+| --- | --- |
+| Complete code; accept selected completion | `Ctrl+Space`; `Tab` or `Enter` |
+| Method parameter information | `Ctrl+Shift+Space` |
+| Find / replace | `Ctrl+F` / `Ctrl+H` |
+| Next / previous match (wraps) | `F3` / `Shift+F3` |
+| Go to line / definition in this file | `Ctrl+G` / `F12` |
+| Format document | `Ctrl+Shift+F` |
+| Toggle selected line comments | `Ctrl+/` |
+| Indent / unindent selected lines | `Tab` / `Shift+Tab` |
+| Undo / redo | `Ctrl+Z` / `Ctrl+Y` |
+| Dismiss completion or information | `Esc` |
+
+Find/replace supports match case, whole words, and regular expressions. Regex replacements support capture groups such as `$1`; literal mode inserts replacement text exactly. Replace all, formatting, and comment commands each form one undo step. Formatting uses four spaces and preserves LF or CRLF line endings. Source editing is locked during validation and execution; opening another source resets the undo history.
 
 Configuration paths resolve relative to the run JSON. Strategies select the instruments they trade; supply their market data in the configured dataset.
 
 Overview reports portfolio performance and equity. Result tabs expose orders, fills, positions, costs, equity (including substrategy balances), and instrument attribution; click a column to sort or use `Ctrl+C` to copy selected rows. Tables show the first 5,000 records; **Results folder** opens the complete JSON/CSV exports. Runs replace matching report files. Prior results are cleared when a new run starts so a failed run cannot appear successful.
 
-This initial workbench edits configuration as JSON and source as plain text; it does not yet provide IntelliSense, a form-based configuration designer, saved-result import, or run cancellation. The window stays responsive during execution but must wait for the current operation before closing. Strategies remain trusted local code with normal process permissions.
+Saved-result import and run cancellation are not yet provided. The window stays responsive during execution but must wait for the current operation before closing. Strategies remain trusted local code with normal process permissions.
 
 Windows-only offline integration and rendering checks:
 
@@ -40,7 +59,7 @@ Windows-only offline integration and rendering checks:
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke
 ```
 
-The smoke check writes its outcome and layout PNGs to the specified folder, and returns a nonzero exit code on failure. `Citrus.slnx` contains the complete product and is built as a solution on Windows. On macOS and Linux, build the CLI and test projects directly as shown above so the Windows desktop project is excluded.
+The smoke check writes its outcome and layout PNGs to the specified folder, and returns a nonzero exit code on failure. It includes real Roslyn completion/diagnostic checks and native editor typing, replacement, undo, formatting, reference changes, and save/run integration. `Citrus.slnx` contains the complete product and is built as a solution on Windows. On macOS and Linux, build the CLI and test projects directly as shown above so the Windows desktop project is excluded.
 
 ## Global settings
 

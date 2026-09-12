@@ -3,7 +3,6 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using Citrus.Trading;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 
 namespace Citrus.Engine;
 
@@ -34,12 +33,8 @@ public sealed class CompiledStrategy : IDisposable
     public static CompiledStrategy Load(string sourcePath, IEnumerable<string>? references = null)
     {
         var paths = (references ?? []).Select(Path.GetFullPath).ToArray();
-        var platform = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))?.Split(Path.PathSeparator) ?? [];
-        var metadata = platform.Concat(paths).Append(typeof(IStrategy).Assembly.Location).Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(p => MetadataReference.CreateFromFile(p));
-        var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(sourcePath), path: sourcePath);
-        var compilation = CSharpCompilation.Create("CitrusStrategy_" + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)))[..16],
-            [tree], metadata, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, optimizationLevel: OptimizationLevel.Release, deterministic: true));
+        var compilation = StrategyCompilation.Create(File.ReadAllText(sourcePath), sourcePath, paths,
+            "CitrusStrategy_" + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)))[..16]);
         using var stream = new MemoryStream();
         var result = compilation.Emit(stream);
         if (!result.Success) throw new InvalidDataException(string.Join(Environment.NewLine, result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)));

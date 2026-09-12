@@ -165,7 +165,7 @@ internal sealed class ConfigurationEditor : UserControl
                 CheckBox check => check.Checked,
                 ComboBox combo => combo.SelectedItem,
                 DateTimePicker date => date.Checked ? new DateTimeOffset(DateTime.SpecifyKind(date.Value, DateTimeKind.Utc)) : null,
-                TextBox text when key == "References" => text.Lines.Where(line => !string.IsNullOrWhiteSpace(line)).Select(line => line.Trim()).ToArray(),
+                TextBox when key == "References" => ReadReferences(),
                 TextBox text => text.Text,
                 _ => throw new InvalidOperationException("Unsupported setting: " + key)
             };
@@ -176,6 +176,10 @@ internal sealed class ConfigurationEditor : UserControl
         if (result.InitialCash <= 0) throw new ArgumentException("Initial cash must be positive.");
         return result;
     }
+
+    /// <summary>Reads assembly paths independently of unfinished simulation settings for live code assistance.</summary>
+    internal string[] ReadReferences() => ((TextBox)inputs["References"]).Lines
+        .Where(line => !string.IsNullOrWhiteSpace(line)).Select(line => line.Trim()).ToArray();
 
     /// <summary>Selects a file or directory and stores a path relative to the run file.</summary>
     private void Browse(TextBox input, string name)

@@ -12,7 +12,7 @@ internal sealed class MainForm : Form
     private readonly ToolStrip toolbar = new() { RenderMode = ToolStripRenderMode.System, GripStyle = ToolStripGripStyle.Hidden };
     private readonly TabControl tabs = new() { Dock = DockStyle.Fill };
     private readonly TreeView navigation = new() { Dock = DockStyle.Fill, HideSelection = false };
-    private readonly RichTextBox strategyEditor = Editor("C# strategy source");
+    private readonly StrategyEditor strategyEditor = new();
     private readonly ConfigurationEditor configEditor = new();
     private readonly TextBox log = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false };
     private readonly ToolStripStatusLabel status = new("Ready — open a run configuration or create an example") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
@@ -83,7 +83,7 @@ internal sealed class MainForm : Form
         workspace.Panel2.Controls.Add(right);
 
         strategyPage = AddPage("Strategy", strategyEditor);
-        strategyPage.Controls.Add(Hint("C# source • Trusted local code • Save all before validation or execution."));
+        strategyPage.Controls.Add(Hint("C# strategy • Ctrl+Space: complete • Ctrl+Shift+Space: parameters • F6: validate • F5: run"));
         configPage = AddPage("Configuration", configEditor);
         configPage.Controls.Add(Hint("Paths are relative to the run file. Rates and margins use fractions: 0.05 = 5%."));
         var overview = AddPage("Overview", chart);
@@ -108,8 +108,12 @@ internal sealed class MainForm : Form
         var statusBar = new StatusStrip { RenderMode = ToolStripRenderMode.System };
         statusBar.Items.AddRange([status, progress]);
         Controls.Add(workspace); Controls.Add(toolbar); Controls.Add(menu); Controls.Add(statusBar);
-        strategyEditor.TextChanged += (_, _) => { if (!loading) strategyDirty = true; UpdateTitle(); };
-        configEditor.ConfigurationChanged += (_, _) => { if (!loading) configDirty = true; UpdateTitle(); };
+        strategyEditor.SourceChanged += (_, _) => { if (!loading) strategyDirty = true; UpdateTitle(); };
+        configEditor.ConfigurationChanged += (_, _) =>
+        {
+            if (!loading) { configDirty = true; RefreshEditorReferences(); }
+            UpdateTitle();
+        };
         FormClosing += OnClosing;
         if (initialPath is not null) Shown += (_, _) => Guard(() => LoadConfiguration(initialPath));
     }
@@ -120,13 +124,6 @@ internal sealed class MainForm : Form
         using var dialog = new HistoricalDataForm();
         dialog.ShowDialog(this);
     }
-
-    /// <summary>Creates a monospaced, plain-text editor with tabs and unwrapped source lines.</summary>
-    private static RichTextBox Editor(string name) => new()
-    {
-        Dock = DockStyle.Fill, Font = new Font("Consolas", 10F), AcceptsTab = true, WordWrap = false,
-        DetectUrls = false, BorderStyle = BorderStyle.Fixed3D, AccessibleName = name
-    };
 
     /// <summary>Creates the compact explanatory strip above an editor or result table.</summary>
     private static Label Hint(string text) => new() { Text = text, Dock = DockStyle.Top, Height = 42, Padding = new Padding(8, 5, 8, 3) };
@@ -181,7 +178,11 @@ internal sealed class MainForm : Form
         sourcePath = BacktestWorkspace.Resolve(fullPath, configuration.Strategy);
         source = File.ReadAllText(sourcePath);
         loading = true;
-        try { configEditor.LoadConfiguration(configuration); configEditor.ConfigurationPath = fullPath; strategyEditor.Text = source; }
+        try
+        {
+            configEditor.LoadConfiguration(configuration); configEditor.ConfigurationPath = fullPath;
+            strategyEditor.LoadSource(source, sourcePath, configuration.References.Select(p => BacktestWorkspace.Resolve(fullPath, p)).ToArray());
+        }
         finally { loading = false; }
         configPath = fullPath; strategyPath = sourcePath;
         configDirty = strategyDirty = false;
@@ -202,7 +203,7 @@ internal sealed class MainForm : Form
     {
         if (configPath is null || strategyPath is null) throw new InvalidOperationException("Open a run configuration or create an example first.");
         var configuration = configEditor.ReadConfiguration();
-        if (strategyDirty) { File.WriteAllText(strategyPath, strategyEditor.Text); strategyDirty = false; }
+        if (strategyDirty) { File.WriteAllText(strategyPath, strategyEditor.SourceText); strategyDirty = false; }
         if (configDirty) { Citrus.Data.Json.Write(configPath, configuration); configDirty = false; }
         UpdateTitle(); AppendLog("Saved workspace documents.");
     }
@@ -227,11 +228,23 @@ internal sealed class MainForm : Form
         {
             var text = File.ReadAllText(path);
             loading = true;
-            try { strategyEditor.Text = text; strategyPath = path; strategyDirty = false; }
+            try
+            {
+                strategyEditor.LoadSource(text, path, configuration.References.Select(p => BacktestWorkspace.Resolve(configPath!, p)).ToArray());
+                strategyPath = path; strategyDirty = false;
+            }
             finally { loading = false; }
             UpdateTitle();
         }
         return configuration;
+    }
+
+    /// <summary>Uses edited reference paths for live code assistance while keeping the currently displayed strategy.</summary>
+    private void RefreshEditorReferences()
+    {
+        if (configPath is null) return;
+        // Resolve and validate file names on the language service's background thread, including partially typed paths.
+        strategyEditor.SetReferences(configEditor.ReadReferences().Select(p => Path.Combine(Path.GetDirectoryName(configPath)!, p)).ToArray());
     }
 
     /// <summary>Compiles the saved strategy away from the UI thread and reports compiler diagnostics.</summary>
@@ -342,7 +355,7 @@ internal sealed class MainForm : Form
     private void SetBusy(bool value, string? message = null)
     {
         busy = value; menu.Enabled = toolbar.Enabled = !value;
-        strategyEditor.ReadOnly = value;
+        strategyEditor.SetReadOnly(value);
         configPage.Enabled = !value;
         progress.Visible = value;
         if (message is not null) { status.Text = message; AppendLog(message); }

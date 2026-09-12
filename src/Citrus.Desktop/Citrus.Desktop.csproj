@@ -6,5 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Citrus.Engine/Citrus.Engine.csproj" />
+    <PackageReference Include="Scintilla5.NET" Version="7.0.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.9.0" />
   </ItemGroup>
 </Project>

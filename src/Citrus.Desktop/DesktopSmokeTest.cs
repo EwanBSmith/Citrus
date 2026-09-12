@@ -6,12 +6,27 @@ namespace Citrus.Desktop;
 /// <summary>Runs offline desktop integration checks and captures native-control layouts on Windows.</summary>
 internal static class DesktopSmokeTest
 {
+    /// <summary>Runs async editor checks under the same persistent Windows Forms synchronization context as the application.</summary>
+    internal static int RunWithMessageLoop(string directory)
+    {
+        using var host = new Form { ShowInTaskbar = false, Opacity = 0 };
+        var result = 1;
+        host.Shown += (_, _) => host.BeginInvoke(() =>
+        {
+            try { result = Run(directory); }
+            finally { host.Close(); }
+        });
+        Application.Run(host);
+        return result;
+    }
+
     /// <summary>Verifies example execution, replay, strict configuration parsing, errors, result binding, and form rendering.</summary>
     internal static int Run(string directory)
     {
         Directory.CreateDirectory(directory);
         try
         {
+            StrategyEditorSmokeTest.Run(directory);
             var globalPath = Path.Combine(Path.GetFullPath(directory), "global-config.json");
             using (var settingsForm = new GlobalSettingsForm(globalPath))
             {
@@ -83,11 +98,11 @@ internal static class DesktopSmokeTest
             Capture(form, Path.Combine(directory, "desktop-overview.png"), new Size(1280, 850));
             Capture(form, Path.Combine(directory, "desktop-compact.png"), new Size(900, 620));
             var controls = Descendants(form).ToArray();
-            var editors = controls.OfType<RichTextBox>().ToArray();
+            var editors = controls.OfType<StrategyEditor>().ToArray();
             var tabs = controls.OfType<TabControl>().Single();
             tabs.SelectedIndex = 0;
             Application.DoEvents();
-            editors.Single(e => e.AccessibleName == "C# strategy source").AppendText("\n// Desktop save verification\n");
+            editors.Single().TextView.AppendText("\n// Desktop save verification\n");
             tabs.SelectedIndex = 1;
             Application.DoEvents();
             var configEditor = controls.OfType<ConfigurationEditor>().Single();
@@ -112,10 +127,21 @@ internal static class DesktopSmokeTest
             if (!File.ReadAllText(BacktestWorkspace.Resolve(path, config.Strategy)).Contains("Desktop save verification"))
                 throw new InvalidOperationException("Source changes were not saved.");
             if (before == File.ReadAllText(equityPath)) throw new InvalidOperationException("Updated capital did not change exports.");
-            if (editors.Any(e => e.ReadOnly)) throw new InvalidOperationException("Editors remained read-only after completion.");
+            if (editors.Any(e => e.TextView.ReadOnly)) throw new InvalidOperationException("Editors remained read-only after completion.");
             foreach (var (index, name) in new[] { (0, "strategy"), (1, "configuration"), (4, "fills") })
             {
                 tabs.SelectedIndex = index;
+                if (index == 0)
+                {
+                    var analyzed = editors.Single().AnalyzeAsync();
+                    var analysisWait = System.Diagnostics.Stopwatch.StartNew();
+                    while (!analyzed.IsCompleted)
+                    {
+                        if (analysisWait.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Editor analysis did not complete.");
+                        Application.DoEvents(); Thread.Sleep(10);
+                    }
+                    analyzed.GetAwaiter().GetResult();
+                }
                 Capture(form, Path.Combine(directory, "desktop-" + name + ".png"), new Size(1280, 850));
                 if (index == 1) Capture(form, Path.Combine(directory, "desktop-configuration-compact.png"), new Size(900, 620));
             }

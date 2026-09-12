@@ -16,6 +16,6 @@ public sealed class PaydaySeasonality : InstrumentStrategy
         if (next.DayOfMonth == 12 || next.IsMonthEnd)
             market.ExitLong(OrderType.MarketOnClose, TimeInForce.Day);
         else if (next.DayOfMonth is 8 or 16)
-            market.BuyNotional(810m, OrderType.MarketOnClose, TimeInForce.Day);
+            market.BuyNotional(810, OrderType.MarketOnClose, TimeInForce.Day);
     }
 }

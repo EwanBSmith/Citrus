@@ -7,8 +7,9 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--smoke-test") Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         ApplicationConfiguration.Initialize();
-        if (args.Length == 2 && args[0] == "--smoke-test") return DesktopSmokeTest.Run(args[1]);
+        if (args.Length == 2 && args[0] == "--smoke-test") return DesktopSmokeTest.RunWithMessageLoop(args[1]);
         Application.Run(new MainForm(args.FirstOrDefault()));
         return 0;
     }
