@@ -1,0 +1,9 @@
+{
+  "strategy": "UniverseHold.cs",
+  "start": "2026-09-01T00:00:00Z",
+  "end": "2026-09-02T00:00:00Z",
+  "interval": { "name": "1h", "minutes": 60 },
+  "cache": "../artifacts/cache",
+  "dataVersion": "research-v1",
+  "output": "../artifacts/universe-results"
+}

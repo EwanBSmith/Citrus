@@ -29,6 +29,73 @@ BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOpt
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
+Test("Universe downloads both symbols, reuses cache, and fetches only extension", () =>
+{
+    var requests = new List<(string Symbol, long Start, long End)>();
+    using var http = new HttpClient(new ResponseHandler(message =>
+    {
+        using var body = JsonDocument.Parse(message.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+        var root = body.RootElement; string response;
+        if (root.GetProperty("type").GetString() == "candleSnapshot")
+        {
+            var req = root.GetProperty("req"); var first = req.GetProperty("startTime").GetInt64(); var last = req.GetProperty("endTime").GetInt64();
+            requests.Add((req.GetProperty("coin").GetString()!, first, last));
+            response = JsonSerializer.Serialize(Enumerable.Range(0, 3).Select(i => start.AddHours(i).ToUnixTimeMilliseconds())
+                .Where(t => t >= first && t <= last).Select(t => new { t, o = "100", h = "105", l = "95", c = "101", v = "10" }));
+        }
+        else
+        {
+            var first = root.GetProperty("startTime").GetInt64(); var last = root.GetProperty("endTime").GetInt64();
+            response = JsonSerializer.Serialize(Enumerable.Range(1, 3).Select(i => start.AddHours(i).ToUnixTimeMilliseconds())
+                .Where(t => t >= first && t <= last).Select(time => new { time, fundingRate = "0.001" }));
+        }
+        return new(HttpStatusCode.OK) { Content = new StringContent(response) };
+    }));
+    var universe = new TradingUniverse { Instruments = [instrument, instrument with { Symbol = "ETH" }] };
+    var loader = new UniverseData(http, Temporary());
+    var first = loader.LoadAsync(universe, start, start.AddHours(2), BarInterval.Hourly).GetAwaiter().GetResult();
+    Equal(4, first.Bars.Count); Equal(2, first.Universe.Count); Equal(2, requests.Count);
+    var second = loader.LoadAsync(universe, start, start.AddHours(2), BarInterval.Hourly).GetAwaiter().GetResult();
+    Equal(JsonSerializer.Serialize(first, Json.Options), JsonSerializer.Serialize(second, Json.Options)); Equal(2, requests.Count);
+    var extended = loader.LoadAsync(universe, start, start.AddHours(3), BarInterval.Hourly).GetAwaiter().GetResult();
+    Equal(6, extended.Bars.Count); Equal(4, requests.Count);
+    True(requests.Skip(2).All(r => r.Start == start.AddHours(2).ToUnixTimeMilliseconds()));
+    var subset = loader.LoadAsync(new() { Instruments = [instrument] }, start.AddHours(1), start.AddHours(2), BarInterval.Hourly).GetAwaiter().GetResult();
+    Equal(1, subset.Bars.Count); Equal(4, requests.Count);
+});
+Test("Universe rejects invalid inputs and unavailable history", () =>
+{
+    using var http = new HttpClient(new ResponseHandler(_ => new(HttpStatusCode.OK) { Content = new StringContent("[]") }));
+    var loader = new UniverseData(http, Temporary()); var universe = new TradingUniverse { Instruments = [instrument] };
+    Throws<ArgumentException>(() => new TradingUniverse().Validate());
+    Throws<ArgumentException>(() => new TradingUniverse { Instruments = [instrument, instrument] }.Validate());
+    Throws<ArgumentException>(() => loader.LoadAsync(universe, start, start, BarInterval.Hourly).GetAwaiter().GetResult());
+    Throws<ArgumentException>(() => loader.LoadAsync(universe, start.AddMinutes(1), start.AddHours(1), BarInterval.Hourly).GetAwaiter().GetResult());
+    Throws<InvalidDataException>(() => loader.LoadAsync(universe, start, start.AddHours(1), BarInterval.Hourly).GetAwaiter().GetResult());
+});
+Test("Universe equity cache works offline with cached calendar and no authentication", () =>
+{
+    var directory = Temporary();
+    var equityInstrument = new Instrument("alpaca", AssetClass.Equity, "AAPL");
+    var session = new MarketSession(start.AddHours(14), start.AddHours(15));
+    var data = Data(100) with { Bars = [new(equityInstrument, session.Open, session.Close, 100, 105, 95, 101, 10, true, true)], Sessions = [session] };
+    var cache = new DataCache(directory);
+    cache.GetAsync(new NamedFixtureProvider(data, "alpaca-iex"), new(equityInstrument, BarInterval.Hourly, session.Open, session.Close), data.Sessions).GetAwaiter().GetResult();
+    Json.Write(Path.Combine(directory, "alpaca-calendar.json"), new[] { new UniverseData.CalendarCoverage(new(2024, 1, 1), new(2024, 1, 3), [session]) });
+    using var http = new HttpClient(new ResponseHandler(_ => throw new Exception("Cache hit must not use HTTP")));
+    var loaded = new UniverseData(http, directory).LoadAsync(new() { Instruments = [equityInstrument] }, start, start.AddDays(1), BarInterval.Hourly).GetAwaiter().GetResult();
+    Equal(1, loaded.Bars.Count); Equal(equityInstrument, loaded.Universe.Single());
+    Throws<InvalidDataException>(() => new UniverseData(http, directory).LoadAsync(new() { Instruments = [equityInstrument] }, start.AddDays(1), start.AddDays(2), BarInterval.Hourly).GetAwaiter().GetResult());
+});
+Test("Universe survives serialization and prevents out-of-universe orders", () =>
+{
+    var data = Data(100, 110) with { Universe = [instrument] };
+    var path = Path.Combine(Temporary(), "dataset.json"); Json.Write(path, data);
+    var restored = Json.Read<MarketDataset>(path);
+    Throws<ArgumentException>(() => Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument with { Symbol = "ETH" }, 1))), restored));
+    Equal(1, Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 1))), restored).Fills.Count);
+});
+
 Test("Market decisions see only completed bars and fill next open", () =>
 {
     var strategy = new CallbackStrategy(onBar: (c, b) => { Equal(b[^1].CloseTime, c.Time); True(c.History(instrument, 100).All(x => x.CloseTime <= c.Time)); if (c.History(instrument, 100).Count == 1) c.Submit(new("a", instrument, 1)); });
@@ -446,6 +513,13 @@ sealed class FixtureProvider(MarketDataset data) : IMarketDataProvider
     /// <summary>Records the request and returns fixture bars contained in its requested interval without network I/O.</summary>
     public Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default)
     { Requests.Add(request); return Task.FromResult(data with { Bars = data.Bars.Where(b => b.OpenTime >= request.Start && b.CloseTime <= request.End).ToList() }); }
+}
+/// <summary>Seeds a cache using a production provider identity without accessing the network.</summary>
+sealed class NamedFixtureProvider(MarketDataset data, string name) : IMarketDataProvider
+{
+    public string Name => name;
+    /// <summary>Returns the supplied complete fixture with the requested provenance.</summary>
+    public Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default) => Task.FromResult(data with { Provider = Name });
 }
 /// <summary>Routes HTTP requests to an in-memory response factory for offline adapter tests.</summary>
 sealed class ResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

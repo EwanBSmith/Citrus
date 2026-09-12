@@ -12,6 +12,12 @@ public static class DatasetValidator
     {
         if (data.SchemaVersion != 1 || data.Interval.Minutes <= 0 || data.Bars.Count == 0)
             throw new InvalidDataException("Dataset requires schemaVersion 1, a positive interval, and bars.");
+        if (data.Universe.Count > 0)
+        {
+            new TradingUniverse { Instruments = data.Universe }.Validate();
+            if (data.Universe.Any(i => !data.Bars.Any(b => b.Instrument == i)) || data.Bars.Any(b => !data.Universe.Contains(b.Instrument)))
+                throw new InvalidDataException("Dataset bars must match its explicit tradable universe.");
+        }
         DateTimeOffset? sessionClose = null;
         foreach (var session in data.Sessions)
         {
@@ -143,13 +149,15 @@ public sealed class DataCache(string directory)
     public async Task<MarketDataset> GetAsync(IMarketDataProvider provider, DataRequest request, IReadOnlyList<MarketSession> sessions,
         CancellationToken cancellationToken = default)
     {
-        if (request.Start >= request.End || request.Start.Offset != TimeSpan.Zero || request.End.Offset != TimeSpan.Zero)
+        if (request.Start >= request.End || request.Start.Offset != TimeSpan.Zero || request.End.Offset != TimeSpan.Zero || request.Interval.Minutes <= 0)
             throw new ArgumentException("Coverage must be a nonempty UTC range.");
         Directory.CreateDirectory(directory);
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{provider.Name}|{request.Instrument.Key}|{request.Interval}|{request.Version}")));
         var path = Path.Combine(directory, key + ".json");
         var data = File.Exists(path) ? Json.Read<MarketDataset>(path) : new MarketDataset { Provider = provider.Name, Version = request.Version, Interval = request.Interval, Sessions = sessions.ToList() };
         if (data.Bars.Count > 0) DatasetValidator.Validate(data);
+        if (data.Interval != request.Interval || data.Bars.Any(b => b.Instrument != request.Instrument))
+            throw new InvalidDataException("Cached instrument or interval does not match the request.");
         var expected = DatasetValidator.Expected(request.Instrument, request.Interval, request.Start, request.End, sessions);
         var actual = data.Bars.Select(b => (b.OpenTime, b.CloseTime)).ToHashSet();
         // Coalesce adjacent missing bars to avoid a request per bar.
@@ -166,6 +174,8 @@ public sealed class DataCache(string directory)
         {
             var fetched = await provider.FetchAsync(request with { Start = gap.Open, End = gap.Close }, cancellationToken);
             DatasetValidator.Validate(fetched);
+            if (fetched.Interval != request.Interval || fetched.Bars.Any(b => b.Instrument != request.Instrument))
+                throw new InvalidDataException("Provider returned a different instrument or interval.");
             data = data with
             {
                 Bars = data.Bars.Concat(fetched.Bars).DistinctBy(b => (b.Instrument, b.OpenTime)).OrderBy(b => b.OpenTime).ToList(),

@@ -1,0 +1,6 @@
+{
+  "instruments": [
+    { "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "BTC" },
+    { "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "ETH" }
+  ]
+}

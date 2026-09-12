@@ -28,6 +28,20 @@ Rerunning a backtest overwrites its result files in the configured output direct
 
 The perpetual example has a trend substrategy and a holding substrategy with 70/30 capital allocation. The equity example demonstrates next-session opening orders across a weekend and the US daylight-saving transition. Generated prices have zero funding and no corporate actions unless supplementary events are added.
 
+## Universe backtests
+
+```sh
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/universe-run.json --universe examples/universe.json
+```
+
+The universe JSON contains an `instruments` array of `{ "venue": "hyperliquid", "assetClass": "LinearPerpetual", "symbol": "BTC" }` records. For equities use, for example, `{ "venue": "alpaca", "assetClass": "Equity", "symbol": "AAPL" }`. Instrument identities are case-sensitive and must match those used by the strategy. Equities route to Alpaca and linear perpetuals to Hyperliquid; a universe can contain both. Duplicate or empty universes fail validation. Strategies cannot submit orders outside this universe.
+
+Set `start`, `end` (UTC), `interval`, `cache`, `dataVersion`, and optionally Alpaca `feed` in the run JSON; omit `data`. Bars must open on or after `start` and close on or before `end`. Perpetual ranges must align to full UTC hourly/daily bars; equity bars follow regular exchange sessions. Ranges with no complete trading bars for a symbol fail explicitly. The universe argument resolves relative to the working directory; cache and other configuration paths resolve relative to the run JSON.
+
+Before simulation, Citrus checks each symbol's cached coverage and downloads only missing bar ranges, including the provider's associated funding/actions. Calendar responses are cached separately with their covered date ranges so holidays are distinguishable from missing calendar data. A fully cached run needs neither network access nor Alpaca credentials. Missing Alpaca data requires `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY`. Existing `data download` cache entries are reusable with matching cache path, feed, interval, instrument, and version; equities may initially need a calendar request. Local data here means the provider cache; arbitrary dataset files still use the existing `data` workflow.
+
+The resolved input, including the tradable universe, is saved as `universe-data.json` in the output directory and hashed in the manifest. To rerun from that snapshot, use a run configuration with `data` pointing to it and omit `--universe`. Missing provider history fails before the strategy starts. Provider limitations and the single-writer cache restriction below still apply. For corporate actions requiring a successor symbol, include that symbol in the universe.
+
 ## Strategies
 
 A source file defines exactly one concrete `IStrategy` with a public parameterless constructor. Specify extra assembly paths in the run configuration's `references` array, or after the source filename with `validate`.

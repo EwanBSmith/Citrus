@@ -76,6 +76,9 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-DATA-005** Citrus shall provide a geometric or arithmetic Brownian-motion data generator, as selected in the detailed design, for simulated prices.
 - **UR-DATA-006** Citrus shall initially support daily and hourly data intervals.
 - **UR-DATA-007** The market-data architecture shall permit additional data intervals to be added later.
+- **UR-DATA-008** Backtests shall accept a universe file argument defining the tradable instruments and check local coverage for every instrument over the configured dates and interval before simulation.
+- **UR-DATA-009** Missing historical coverage shall be downloaded from Alpaca for equities or Hyperliquid for perpetuals and stored locally for reuse. Unavailable coverage shall fail the run rather than shorten it silently.
+- **UR-DATA-010** Fully cached universe backtests shall run without provider network access, including reuse of cached equity calendar coverage.
 
 ### 3.5 Backtesting and results
 
