@@ -7,20 +7,22 @@ Citrus is a .NET 10 backtesting engine for trusted C# strategy files. It runs on
 Install the .NET 10 SDK, then run from the repository root:
 
 ```sh
-dotnet restore Citrus.slnx --configfile NuGet.Config
-dotnet build Citrus.slnx --no-restore -c Release
+dotnet restore src/Citrus.Cli/Citrus.Cli.csproj --configfile NuGet.Config
+dotnet restore tests/Citrus.Tests/Citrus.Tests.csproj --configfile NuGet.Config
+dotnet build src/Citrus.Cli/Citrus.Cli.csproj --no-restore -c Release
+dotnet build tests/Citrus.Tests/Citrus.Tests.csproj --no-restore -c Release
 dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore
 ```
 
-The automated test executable returns a nonzero exit code on failure. It uses no external test packages or network calls. `dotnet test` is not the test entry point. Compilation uses Roslyn assemblies supplied with the SDK, copied into the application output. No package downloads are needed. The SDK is required to build; the .NET 10 runtime can run the built CLI.
+These commands work on Windows, macOS, and Linux. The automated test executable returns a nonzero exit code on failure. It uses no external test packages or network calls. `dotnet test` is not the test entry point. Compilation uses Roslyn assemblies supplied with the SDK, copied into the application output. No package downloads are needed. The SDK is required to build; the .NET 10 runtime can run the built CLI.
 
 ## Windows desktop workbench
 
 The initial GUI uses Windows Forms with native menus, a toolbar, a workspace tree, split panes, tabbed editors, sortable result tables, and an equity chart. The engine and CLI remain cross-platform; the desktop application requires Windows and the .NET 10 Desktop Runtime (included with the Windows SDK).
 
 ```sh
-dotnet restore Citrus.Windows.slnx --configfile NuGet.Config
-dotnet build Citrus.Windows.slnx -c Release --no-restore
+dotnet restore Citrus.slnx --configfile NuGet.Config
+dotnet build Citrus.slnx -c Release --no-restore
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
 ```
 
@@ -38,7 +40,7 @@ Windows-only offline integration and rendering checks:
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke
 ```
 
-The smoke check writes its outcome and layout PNGs to the specified folder, and returns a nonzero exit code on failure. `Citrus.slnx` remains the portable engine/CLI solution; `Citrus.Windows.slnx` adds the desktop application.
+The smoke check writes its outcome and layout PNGs to the specified folder, and returns a nonzero exit code on failure. `Citrus.slnx` contains the complete product and is built as a solution on Windows. On macOS and Linux, build the CLI and test projects directly as shown above so the Windows desktop project is excluded.
 
 ## Global settings
 

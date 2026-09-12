@@ -4,5 +4,6 @@
   <Project Path="src/Citrus.Data/Citrus.Data.csproj" />
   <Project Path="src/Citrus.Engine/Citrus.Engine.csproj" />
   <Project Path="src/Citrus.Cli/Citrus.Cli.csproj" />
+  <Project Path="src/Citrus.Desktop/Citrus.Desktop.csproj" />
   <Project Path="tests/Citrus.Tests/Citrus.Tests.csproj" />
 </Solution>

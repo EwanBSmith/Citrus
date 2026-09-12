@@ -11,16 +11,22 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - run: dotnet restore Citrus.slnx --configfile NuGet.Config
-      - run: dotnet build Citrus.slnx --no-restore -c Release
+      - if: runner.os != 'Windows'
+        run: dotnet restore src/Citrus.Cli/Citrus.Cli.csproj --configfile NuGet.Config
+      - if: runner.os != 'Windows'
+        run: dotnet restore tests/Citrus.Tests/Citrus.Tests.csproj --configfile NuGet.Config
+      - if: runner.os != 'Windows'
+        run: dotnet build src/Citrus.Cli/Citrus.Cli.csproj --no-restore -c Release
+      - if: runner.os != 'Windows'
+        run: dotnet build tests/Citrus.Tests/Citrus.Tests.csproj --no-restore -c Release
+      - if: runner.os == 'Windows'
+        run: dotnet restore Citrus.slnx --configfile NuGet.Config
+      - if: runner.os == 'Windows'
+        run: dotnet build Citrus.slnx --no-restore -c Release
       - run: dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/perpetual-data.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/perpetual-run.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/equity-data.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/equity-run.json
-      - if: runner.os == 'Windows'
-        run: dotnet restore Citrus.Windows.slnx --configfile NuGet.Config
-      - if: runner.os == 'Windows'
-        run: dotnet build Citrus.Windows.slnx -c Release --no-restore
       - if: runner.os == 'Windows'
         run: dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke
