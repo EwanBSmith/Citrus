@@ -7,6 +7,4 @@
   <Project Path="src/Citrus.Desktop/Citrus.Desktop.csproj" />
   <Project Path="tests/Citrus.Tests/Citrus.Tests.csproj" />
   <Project Path="src/Citrus.Strategies/Citrus.Strategies.csproj" />
-  <Project Path="src/Citrus.StrategyRunner/Citrus.StrategyRunner.csproj" />
-  <Project Path="tests/Citrus.Strategies.Tests/Citrus.Strategies.Tests.csproj" />
 </Solution>

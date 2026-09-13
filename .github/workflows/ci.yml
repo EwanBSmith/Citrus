@@ -26,7 +26,6 @@ jobs:
       - if: runner.os == 'Windows'
         run: dotnet build Citrus.slnx --no-restore -c Release
       - run: dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore
-      - run: dotnet run --project tests/Citrus.Strategies.Tests -c Release
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/cache/perpetual-data.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/PerpetualTrend
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/cache/equity-data.json

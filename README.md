@@ -34,22 +34,19 @@ Run the Windows integration check with `dotnet run --project src/Citrus.Desktop 
 
 ## Strategy development
 
-Strategies live in this repository and the main `Citrus.slnx` solution. Edit `src/Citrus.Strategies/ZorroPortfolio.cs` or add another class to that project. Strategy code references `Citrus.Trading`; the debug runner and tests reference `Citrus.Engine`. There is no strategy submodule or separate repository to update.
+Strategies live in this repository and the main `Citrus.slnx` solution. Edit `src/Citrus.Strategies/ZorroPortfolio.cs` or add another class to that project. Strategy code references `Citrus.Trading`; the desktop and CLI build and execute it through `Citrus.Engine`. There is no strategy submodule or separate repository to update.
 
-Open `Citrus.slnx` in Visual Studio or Rider. Set `Citrus.StrategyRunner` as the startup project to debug: no arguments runs the synthetic Demo, and `Default` runs ZorroPortfolio against the configured historical cache. Add new strategy types to the runner factory when you want to debug them directly.
+Open `Citrus.slnx` in Visual Studio or Rider and edit the strategies in `Citrus.Strategies`. Use the desktop or CLI to execute backtests; no additional runner or strategy test project is required.
 
 Launch the workbench from the repository root with `dotnet run --project src/Citrus.Desktop -c Release -- .`. Default, Demo and Comparison configurations live in `Backtests/`; they open this same solution through **Open in IDE**. Save source in your IDE, then press F5 in Citrus to build and run. Results go to `Results/<backtest-name>` and are excluded from Git.
 
 ```powershell
-# Generate the offline demo cache and run the debug example.
-dotnet run --project src/Citrus.StrategyRunner -c Release
-$env:CITRUS_HISTORICAL_DATA = Join-Path $PWD 'artifacts/demo-cache'
-dotnet run --project src/Citrus.Cli -c Release -- backtest . Demo
-dotnet run --project src/Citrus.Cli -c Release -- replay Results/Demo
-dotnet run --project tests/Citrus.Strategies.Tests -c Release
+# Run ZorroPortfolio using the configured historical cache.
+dotnet run --project src/Citrus.Cli -c Release -- backtest . Default
+dotnet run --project src/Citrus.Cli -c Release -- replay Results/Default
 ```
 
-For ZorroPortfolio, use the configured historical cache (remove the demo environment override if set) and run `backtest . Default`. Commit strategy changes, backtest configurations and any engine changes together in this repository. The previously created standalone strategy repository is superseded; it is not required for this workflow.
+Default requires the portfolio ETF history in the configured cache. Demo requires BTC history; use the existing CLI data-generation command for synthetic data if needed. Commit strategy changes, backtest configurations and any engine changes together in this repository. The previously created standalone strategy repository is superseded; it is not required for this workflow.
 
 A workspace configuration can select a normal single-target .NET 10 class-library project:
 
