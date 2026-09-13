@@ -8,6 +8,7 @@
  </UserControl.Resources>
  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
   <StackPanel Margin="16" Grid.IsSharedSizeScope="True">
+   <TextBlock Text="Settings assigned in the strategy's Configure method are read-only. Save C# changes and Validate to refresh them; unassigned settings remain editable." TextWrapping="Wrap" Margin="0,0,0,14"/>
    <GroupBox Header="External strategy" Padding="12" Margin="0,0,0,14"><StackPanel>
     <TextBlock Text="Select a project to build, or a prebuilt DLL. Paths are relative to the workspace." TextWrapping="Wrap"/>
     <Label Content="Strategy project (.csproj)" Target="{Binding ElementName=StrategyProject}"/>

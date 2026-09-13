@@ -16,6 +16,8 @@ public partial class MainWindow : Window
     private bool configDirty;
     private bool loading;
     private bool busy;
+    /// <summary>Tracks initial asynchronous option discovery for the current workspace.</summary>
+    internal Task OptionsReady { get; private set; } = Task.CompletedTask;
 
     /// <summary>Creates an empty workbench without accessing user files in the designer.</summary>
     public MainWindow() : this(null, null) { }
@@ -174,6 +176,7 @@ public partial class MainWindow : Window
         ClearResults(); UpdateTitle();
         status.Text = fullPath;
         AppendLog("Opened " + fullPath);
+        OptionsReady = ValidateAsync(save: false);
     }
 
     /// <summary>Generates an isolated sample workspace and opens it for immediate offline execution.</summary>
@@ -184,10 +187,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Saves validated backtest settings; strategy source belongs to the external IDE.</summary>
-    private void SaveAll()
+    private void SaveAll(bool validate = true)
     {
         if (configPath is null || strategyPath is null) throw new InvalidOperationException("Open a run configuration or create an example first.");
-        var configuration = configEditor.ReadConfiguration();
+        var configuration = configEditor.ReadConfiguration(validate);
         StrategyFolder.Validate(configuration);
         if (configDirty) { Citrus.Data.Json.Write(configPath, configuration); configDirty = false; }
         UpdateTitle(); AppendLog("Saved workspace documents.");
@@ -206,8 +209,8 @@ public partial class MainWindow : Window
     /// <summary>Captures saved settings and refreshes source if the configured strategy path has changed.</summary>
     private RunConfiguration Prepare()
     {
-        SaveAll();
-        var configuration = configEditor.ReadConfiguration();
+        SaveAll(validate: false);
+        var configuration = configEditor.ReadConfiguration(validate: false);
         strategyPath = StrategyFolder.Input(configPath!, configuration);
         UpdateTitle();
         return configuration;
@@ -225,20 +228,22 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Compiles the saved strategy away from the UI thread and reports compiler diagnostics.</summary>
-    private async Task ValidateAsync()
+    private async Task ValidateAsync(bool save = true)
     {
         if (busy) return;
         try
         {
-            var config = Prepare();
+            var config = save ? Prepare() : configEditor.ReadConfiguration(validate: false);
             var path = configPath!;
             SetBusy(true, "Validating strategy...");
-            var name = await Task.Run(() =>
+            var resolved = await Task.Run(() =>
             {
                 using var compiled = CompiledStrategy.LoadConfiguration(path, config);
-                return compiled.Strategy.GetType().Name;
+                return (Name: compiled.Strategy.GetType().Name, Configuration: compiled.EffectiveConfiguration(config),
+                    Fields: compiled.Options.Keys.Select(StrategyConfiguration.Field).ToArray());
             });
-            AppendLog("Valid strategy: " + name); status.Text = "Strategy validation succeeded";
+            configEditor.LoadConfiguration(resolved.Configuration, resolved.Fields);
+            AppendLog("Valid strategy: " + resolved.Name); status.Text = "Strategy settings loaded — C# assignments are read-only";
         }
         catch (Exception exception) { ShowError(exception); }
         finally { SetBusy(false); }
@@ -255,7 +260,8 @@ public partial class MainWindow : Window
             ClearResults();
             SetBusy(true, "Running backtest — preparing data, compiling, simulating and exporting...");
             var watch = Stopwatch.StartNew();
-            var completed = await Task.Run(() => BacktestWorkspace.RunAsync(path, config, historicalDataDirectory));
+            var completed = await Task.Run(() => BacktestWorkspace.RunAsync(path, config, historicalDataDirectory,
+                (effective, fields) => Dispatcher.Invoke(() => configEditor.LoadConfiguration(effective, fields))));
             Present(completed);
             status.Text = $"Completed in {watch.Elapsed.TotalSeconds:N1}s — {completed.Output}";
             AppendLog(status.Text);

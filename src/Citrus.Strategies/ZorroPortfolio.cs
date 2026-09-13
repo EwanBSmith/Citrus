@@ -15,6 +15,15 @@ public sealed class ZorroPortfolio : DailyStrategy
     protected override string ClockSymbol => "SCHB";
     protected override int WarmupBars => 91;
 
+    /// <summary>Fixes the portfolio's starting cash, daily bars and borrowing model in strategy code.</summary>
+    protected override void Configure(StrategyOptions options)
+    {
+        options.InitialCash = 17_000m;
+        options.Interval = BarInterval.Daily;
+        options.AnnualBorrowRate = 0m;
+        options.ShortsAvailable = true;
+    }
+
     /// <summary>Uses the source account and asset ordering, with natural gas disabled.</summary>
     protected override void Initialize()
     {

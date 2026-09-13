@@ -97,11 +97,14 @@ internal static class DesktopSmokeTest
             var window = new MainWindow(null, exampleLibrary);
             ShowHidden(window); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             window.LoadConfiguration(StrategyFolder.Root(path)!);
+            await window.OptionsReady;
             window.backtests.Items.Cast<MenuItem>().Single(item => item.Tag as string == "HigherCosts")
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await window.OptionsReady;
             Require(window.configEditor.ReadConfiguration().InitialCash == 75000, "Named backtest selection did not load.");
             window.backtests.Items.Cast<MenuItem>().Single(item => item.Tag as string == "Default")
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await window.OptionsReady;
             window.Present(first);
             Require(window.fills.Items.Count == 1, "Fill results were not bound.");
             window.tabs.SelectedIndex = 4;
@@ -147,6 +150,34 @@ internal static class DesktopSmokeTest
                 await CaptureAsync(window, Path.Combine(directory, "desktop-" + name + ".png"), 1280, 850);
                 if (index == 1) await CaptureAsync(window, Path.Combine(directory, "desktop-configuration-compact.png"), 900, 620);
             }
+            // Discover authoritative values on open, preserve editable fields, and refresh after external source edits.
+            var sourcePath = StrategyFolder.Source(path, config);
+            File.WriteAllText(sourcePath, originalSource.Replace("private InstrumentContext market = null!;", """
+                public void Configure(StrategyOptions options)
+                {
+                    options.InitialCash = 54321; options.Seed = 0; options.ShortsAvailable = false;
+                    options.Interval = BarInterval.Daily;
+                }
+                private InstrumentContext market = null!;
+                """));
+            window.LoadConfiguration(path);
+            await window.OptionsReady;
+            Require(editor.ReadConfiguration().InitialCash == 54321 && editor.ReadConfiguration().Seed == 0 &&
+                !editor.InitialCash.IsEnabled && !editor.Seed.IsEnabled && !editor.ShortsAvailable.IsEnabled &&
+                editor.Output.IsEnabled && editor.Start.IsEnabled, "Authoritative values were not displayed and locked selectively.");
+            editor.InitialCash.Text = "1";
+            Require(editor.ReadConfiguration().InitialCash == 54321, "A disabled field bypassed strategy authority.");
+            await window.RunAsync();
+            using (var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(first.Output, "manifest.json"))))
+                Require(manifest.RootElement.GetProperty("configuration").GetProperty("initialCash").GetDecimal() == 54321,
+                    "Desktop reports did not capture effective strategy settings.");
+            window.tabs.SelectedIndex = 1;
+            await CaptureAsync(window, Path.Combine(directory, "strategy-options.png"), 1000, 760);
+            File.WriteAllText(sourcePath, originalSource);
+            window.LoadConfiguration(path);
+            await window.OptionsReady;
+            Require(editor.InitialCash.IsEnabled && editor.Seed.IsEnabled && editor.ShortsAvailable.IsEnabled,
+                "Removing strategy declarations left fields locked.");
             editor.References.Text = Path.Combine(directory, "missing-strategy-reference.dll");
             var failed = false;
             try { await window.RunAsync(); }

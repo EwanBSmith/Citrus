@@ -40,6 +40,7 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-PLAT-003A** Strategies shall be written in C# against Citrus.Trading.
 - **UR-PLAT-003B** Citrus shall build selected strategy projects in Release before execution, or load explicitly selected prebuilt assemblies.
 - **UR-PLAT-003C** The strategy execution contract shall be independent of the authoring IDE and repository; strategy code shall reference Citrus.Trading.
+- **UR-PLAT-003D** Strategies may declare authoritative run settings in C#. Explicit assignments shall override JSON and GUI settings before data selection and account creation; undeclared settings remain editable. The GUI shall display declared settings read-only and reports shall capture the effective configuration.
 - **UR-PLAT-004** A strategy definition shall run in backtesting and live trading without modification, except for behaviour explicitly selected through runtime context.
 - **UR-PLAT-005** Citrus shall open externally maintained strategy solutions or projects in the associated IDE. Strategy authoring, debugging and source control belong to the external development environment.
 - **UR-PLAT-006** Citrus shall provide a command-line interface for deployment and execution.

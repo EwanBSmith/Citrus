@@ -21,8 +21,12 @@ internal static class BacktestWorkspace
         StrategyFolder.Resolve(configurationPath, path);
 
     /// <summary>Loads a market dataset, compiles trusted source, executes, and exports a completed backtest.</summary>
-    internal static Task<WorkspaceResult> RunAsync(string configurationPath, RunConfiguration config, string? historicalDataDirectory = null)
+    internal static Task<WorkspaceResult> RunAsync(string configurationPath, RunConfiguration config, string? historicalDataDirectory = null,
+        Action<RunConfiguration, IReadOnlyCollection<string>>? onConfigured = null)
     {
+        using var compiled = CompiledStrategy.LoadConfiguration(configurationPath, config);
+        config = compiled.EffectiveConfiguration(config);
+        onConfigured?.Invoke(config, compiled.Options.Keys.Select(StrategyConfiguration.Field).ToArray());
         if (string.IsNullOrWhiteSpace(config.Output))
             throw new ArgumentException("An output path is required.");
         var output = Resolve(configurationPath, config.Output);
@@ -31,7 +35,6 @@ internal static class BacktestWorkspace
         Directory.CreateDirectory(output);
         var dataPath = Path.Combine(output, "historical-data.json");
         Json.Write(dataPath, data);
-        using var compiled = CompiledStrategy.LoadConfiguration(configurationPath, config);
         var result = new BacktestEngine().Run(compiled.Strategy, data, config);
         Reports.Export(output, result, config, data, compiled.InputPath, dataPath, compiled.DependencyHashes, compiled);
         var metrics = Reports.Metrics(result.Equity.Select(p => (p.Time, p.Equity)), config.RiskFreeRate,

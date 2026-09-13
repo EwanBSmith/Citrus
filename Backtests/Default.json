@@ -1,11 +1,6 @@
 {
   "schemaVersion": 1,
-  "initialCash": 17000,
   "output": "Results/Default",
-  "simulation": {
-    "annualBorrowRate": 0,
-    "shortsAvailable": true
-  },
   "strategyProject": "src/Citrus.Strategies/Citrus.Strategies.csproj",
   "strategyType": "ZorroPortfolio",
   "strategySolution": "Citrus.slnx"

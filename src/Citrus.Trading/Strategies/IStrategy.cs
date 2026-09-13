@@ -3,6 +3,8 @@ namespace Citrus.Trading;
 /// <summary>Receives sequential lifecycle and market callbacks; all callbacks are optional and execute as trusted local code.</summary>
 public interface IStrategy
 {
+    /// <summary>Declares authoritative settings before historical data is selected or account state is created; use deterministic assignments.</summary>
+    void Configure(StrategyOptions options) { }
     /// <summary>Runs before market events; register substrategies and optionally submit initial orders here.</summary>
     void OnStart(IStrategyContext context) { }
     /// <summary>Receives bars closing at the current time after execution and accounting; these bars are already available in history.</summary>

@@ -20,6 +20,8 @@ public sealed class BacktestEngine
     public BacktestResult Run(IStrategy strategy, MarketDataset data, RunConfiguration configuration,
         ExecutionMode mode = ExecutionMode.Backtest)
     {
+        configuration = StrategyConfiguration.Resolve(strategy, configuration);
+        data = StrategyConfiguration.SelectData(strategy, data, configuration);
         DatasetValidator.Validate(data);
         configuration.Simulation.Validate();
         if (configuration.SchemaVersion != 1 || configuration.InitialCash <= 0)

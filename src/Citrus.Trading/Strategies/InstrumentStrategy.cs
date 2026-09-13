@@ -3,6 +3,10 @@ namespace Citrus.Trading;
 /// <summary>Registers one substrategy and dispatches only its instrument's bars through a convenient trading context.</summary>
 public abstract class InstrumentStrategy : IStrategy
 {
+    /// <summary>Forwards the configuration phase before the instrument context exists.</summary>
+    void IStrategy.Configure(StrategyOptions options) => Configure(options);
+    /// <summary>Declares authoritative settings before historical data or accounts are created.</summary>
+    protected virtual void Configure(StrategyOptions options) { }
     private readonly Instrument instrument;
     private readonly string substrategy;
     private readonly decimal capitalWeight;

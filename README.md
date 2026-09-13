@@ -48,6 +48,26 @@ dotnet run --project src/Citrus.Cli -c Release -- replay Results/Default
 
 Default requires the portfolio ETF history in the configured cache. Demo requires BTC history; use the existing CLI data-generation command for synthetic data if needed. Commit strategy changes, backtest configurations and any engine changes together in this repository. The previously created standalone strategy repository is superseded; it is not required for this workflow.
 
+### Settings in strategy code
+
+Declare authoritative run settings in `Configure`. For `DailyStrategy` and `InstrumentStrategy`, override the protected method; direct `IStrategy` implementations use `public void Configure(StrategyOptions options)`.
+
+```csharp
+protected override void Configure(StrategyOptions options)
+{
+    options.InitialCash = 17_000m;
+    options.Interval = BarInterval.Daily;
+    options.AnnualBorrowRate = 0m;
+    options.ShortsAvailable = true;
+}
+```
+
+Only explicitly assigned properties override JSON and GUI settings. Assigning zero, false, or null is explicit too: for example, `options.Start = null` requires all available starting history even if JSON specifies a start date. Unassigned settings remain configurable per backtest. The available declarations cover start/end dates, interval, capital, rejection seed, risk-free rate, commissions, spread, slippage, rejection probability, borrowing, short availability, and equity/perpetual margins. Strategy-specific thresholds and allocations remain ordinary C# fields.
+
+The GUI builds and reads declarations when opening a workspace, displays effective values, and disables the fields controlled by C#. Save source changes and use **Validate** to refresh; **Run** always reloads the declarations. A new strategy project/type selection is refreshed by Validate or Run. Configuration occurs before cache selection, account creation, or `OnStart`/`Initialize`. Keep `Configure` deterministic and independent of market/context state. Declarations are frozen once per loaded strategy instance.
+
+CLI runs, GUI runs, and direct engine calls apply the same precedence rules. Reports record the effective configuration and declared options; captured assembly replay uses the same strategy declarations. Paths, strategy selection, output locations, historical-cache locations and credentials remain outside strategy options. ZorroPortfolio defines its $17,000 capital, daily interval, zero borrowing and short availability in C#; its dates remain per-backtest settings.
+
 A workspace configuration can select a normal single-target .NET 10 class-library project:
 
 ```json

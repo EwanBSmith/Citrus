@@ -3,6 +3,10 @@ namespace Citrus.Trading;
 /// <summary>Provides daily portfolio hooks using completed bars and ordinary pre-close auction submissions.</summary>
 public abstract class DailyStrategy : IStrategy
 {
+    /// <summary>Forwards the configuration phase before the trading context exists.</summary>
+    void IStrategy.Configure(StrategyOptions options) => Configure(options);
+    /// <summary>Declares authoritative settings before historical data or accounts are created.</summary>
+    protected virtual void Configure(StrategyOptions options) { }
     private IStrategyContext? context;
     private Instrument? clock;
     private DateTimeOffset? lastClose;

@@ -26,6 +26,7 @@ try
         var configuration = folderConfig is null ? null : StrategyFolder.Read(folderConfig);
         using var compiled = folderConfig is null ? CompiledStrategy.Load(args[1], args.Skip(2))
             : CompiledStrategy.LoadConfiguration(folderConfig, configuration! with { References = configuration!.References.Concat(args.Skip(2).Select(Path.GetFullPath)).ToArray() });
+        compiled.EffectiveConfiguration(configuration ?? new());
         Console.WriteLine($"Valid strategy: {compiled.Strategy.GetType().Name}"); return 0;
     }
     if (args[0] == "backtest" && args.Length is 2 or 3 || args[0] == "replay" && args.Length == 2)
@@ -35,13 +36,14 @@ try
         // Return an absolute path using the configuration directory as the base for relative paths.
         string Resolve(string path) => StrategyFolder.Resolve(configPath, path);
         var config = StrategyFolder.Read(configPath);
+        using var compiled = CompiledStrategy.LoadConfiguration(configPath, config);
+        config = compiled.EffectiveConfiguration(config);
         var output = Resolve(config.Output);
         var data = replay ? Json.Read<MarketDataset>(Path.Combine(Path.GetDirectoryName(configPath)!, "historical-data.json"))
             : DataCache.Load(GlobalConfiguration.Load().ResolveHistoricalDataDirectory(), config.Interval, config.Start, config.End);
         Directory.CreateDirectory(output);
         var dataPath = Path.Combine(output, "historical-data.json");
         Json.Write(dataPath, data);
-        using var compiled = CompiledStrategy.LoadConfiguration(configPath, config);
         var result = new BacktestEngine().Run(compiled.Strategy, data, config);
         Reports.Export(output, result, config, data, compiled.InputPath, dataPath, compiled.DependencyHashes, compiled);
         Console.WriteLine($"Completed: {result.Fills.Count} attributed fills; final equity {result.Final.Equity.ToString("F2", CultureInfo.InvariantCulture)}. Results: {output}"); return 0;

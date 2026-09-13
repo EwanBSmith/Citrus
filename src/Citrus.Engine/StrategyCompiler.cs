@@ -34,6 +34,10 @@ public sealed class CompiledStrategy : IDisposable
     private readonly AssemblyLoadContext context;
     /// <summary>Gets the instantiated strategy defined by the source file.</summary>
     public IStrategy Strategy { get; }
+    /// <summary>Gets frozen authoritative settings declared by this strategy.</summary>
+    public IReadOnlyDictionary<string, object?> Options => StrategyConfiguration.Declarations(Strategy);
+    /// <summary>Gets the validated effective configuration for this loaded strategy.</summary>
+    public RunConfiguration EffectiveConfiguration(RunConfiguration requested) => StrategyConfiguration.Apply(requested, Options);
     /// <summary>Gets SHA-256 hashes keyed by absolute explicit dependency paths for provenance.</summary>
     public IReadOnlyDictionary<string, string> DependencyHashes { get; }
     private string? snapshotDirectory;

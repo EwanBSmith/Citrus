@@ -48,6 +48,7 @@ public static class Reports
         string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes, CompiledStrategy? compiled = null)
     {
         Directory.CreateDirectory(directory);
+        if (compiled is not null) configuration = compiled.EffectiveConfiguration(configuration);
         var annualDays = data.Bars.Any(b => b.Instrument.AssetClass == AssetClass.LinearPerpetual) ? 365 : 252;
         var summary = new
         {
@@ -102,6 +103,7 @@ public static class Reports
             runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
             strategyHash = Hash(strategyPath), dataHash = Hash(dataPath), dependencyHashes, strategyArtifacts,
             strategyRevision = compiled?.StrategyRevision, citrusRevision = compiled?.CitrusRevision,
+            strategyOptions = compiled?.Options,
             calendarHash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(data.Sessions, Json.Options))),
             reproducibility = "Repeatability requires unchanged inputs, engine/runtime, and a deterministic trusted strategy. External I/O and script-owned randomness are untracked.",
             data.Provider, data.Notes

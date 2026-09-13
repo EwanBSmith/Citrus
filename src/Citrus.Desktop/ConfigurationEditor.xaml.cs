@@ -13,6 +13,7 @@ public partial class ConfigurationEditor : UserControl
     private readonly HashSet<string> changed = [];
     private RunConfiguration original = new();
     private bool loading = true;
+    private HashSet<string> authoritative = [];
     internal event EventHandler? ConfigurationChanged;
     internal string? ConfigurationPath { get; set; }
 
@@ -55,6 +56,8 @@ public partial class ConfigurationEditor : UserControl
     {
         if (loading) return;
         var key = inputs.Single(p => ReferenceEquals(p.Value, sender)).Key;
+        if (key is "StrategyProject" or "StrategyAssembly" or "StrategyType" or "References") ClearAuthority();
+        if (authoritative.Contains(key)) return;
         changed.Add(key);
         ConfigurationChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -68,14 +71,18 @@ public partial class ConfigurationEditor : UserControl
     }
 
     /// <summary>Loads all values without marking the document dirty or rounding decimals and timestamps.</summary>
-    internal void LoadConfiguration(RunConfiguration configuration)
+    internal void LoadConfiguration(RunConfiguration configuration, IReadOnlyCollection<string>? lockedFields = null)
     {
         loading = true;
         try
         {
             original = configuration;
+            ClearAuthority();
+            authoritative = lockedFields?.ToHashSet() ?? [];
             foreach (var (key, input) in inputs)
             {
+                input.IsEnabled = !authoritative.Contains(key);
+                if (authoritative.Contains(key)) input.ToolTip = "Defined in strategy C#; edit Configure and validate again to refresh.";
                 var (owner, property) = Property(configuration, key);
                 var value = property.GetValue(owner);
                 switch (input)
@@ -102,12 +109,20 @@ public partial class ConfigurationEditor : UserControl
         finally { loading = false; }
     }
 
+    /// <summary>Unlocks fields when the selected strategy changes; new declarations are read on validation or execution.</summary>
+    private void ClearAuthority()
+    {
+        foreach (var key in authoritative) { inputs[key].IsEnabled = true; inputs[key].ToolTip = null; }
+        authoritative.Clear();
+    }
+
     /// <summary>Parses only edited fields and checks the same simulation constraints as the engine.</summary>
-    internal RunConfiguration ReadConfiguration()
+    internal RunConfiguration ReadConfiguration(bool validate = true)
     {
         var root = JsonSerializer.SerializeToNode(original)!;
         foreach (var key in changed)
         {
+            if (authoritative.Contains(key)) continue;
             var parts = key.Split('.');
             var node = parts.Length == 2 ? root["Simulation"]! : root;
             var (_, property) = Property(original, key);
@@ -133,11 +148,7 @@ public partial class ConfigurationEditor : UserControl
         if ((changed.Contains("StrategyProject") || changed.Contains("StrategyAssembly")) &&
             (!string.IsNullOrWhiteSpace(result.StrategyProject) || !string.IsNullOrWhiteSpace(result.StrategyAssembly)))
             result = result with { Strategy = null };
-        result.Simulation.Validate();
-        StrategyFolder.Validate(result);
-        if (result.InitialCash <= 0) throw new ArgumentException("Initial cash must be positive.");
-        if (result.Start is not null && result.End is not null && result.Start >= result.End)
-            throw new ArgumentException("Start must precede the exclusive end.");
+        if (validate) StrategyConfiguration.Validate(result);
         return result;
     }
 

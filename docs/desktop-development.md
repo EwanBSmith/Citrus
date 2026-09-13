@@ -23,9 +23,9 @@ App.xaml owns shared styles and App.xaml.cs starts the WPF dispatcher. MainWindo
 
 ## External strategy integration
 
-MainWindow opens the selected solution/project through Windows file associations. ConfigurationEditor preserves project, assembly, type and solution settings. Validation and runs call CompiledStrategy.LoadConfiguration on a background thread. Project builds report diagnostics in the execution log; WPF never owns or saves strategy source.
+MainWindow opens the selected solution/project through Windows file associations. ConfigurationEditor preserves project, assembly, type and solution settings. Opening a workspace, validation and runs call CompiledStrategy.LoadConfiguration on a background thread. StrategyConfiguration freezes Configure assignments and applies them before loading historical data. ConfigurationEditor displays effective values and disables explicitly assigned fields; output and strategy-selection fields remain editable. Project builds report diagnostics in the execution log; WPF never owns or saves strategy source.
 
-The smoke suite checks source preservation, configuration persistence, result bindings and background backtests. Run:
+The smoke suite checks source preservation, authoritative field locking and refresh, effective report settings, configuration persistence, result bindings and background backtests. Run:
 
 ```powershell
 dotnet build Citrus.slnx -c Release --no-restore
