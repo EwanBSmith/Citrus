@@ -22,6 +22,6 @@ The source requirements remain unchanged. This table maps first-release requirem
 
 ## Acceptance evidence and limits
 
-The tests cover deterministic next-bar decisions, compatible and incompatible netting, exact commission allocation, accounting and adjusted equity prices, validation failures, cache reuse, provider pagination, credential-safe provider errors, compiler errors, and export totals. CI additionally executes CLI generation and backtests. The performance harness runs the research-scale daily and hourly cases with no timing threshold.
+The tests cover the daily strategy API, pending-aware position intents, pre-close scheduling, deterministic next-bar decisions, compatible and incompatible netting, exact commission allocation, accounting and adjusted equity prices, validation failures, cache reuse, provider pagination, credential-safe provider errors, compiler errors, and export totals. CI additionally executes CLI generation and backtests. The performance harness runs the research-scale daily and hourly cases with no timing threshold.
 
 HTTP tests use realistic offline fixtures, not credentials. Credentialed acceptance is opt-in: execute the documented `data download` commands with an entitled account and an available date range. Provider coverage/entitlements and historical adjustment completeness cannot be established by offline tests. Funding mark approximation, common settlement currency, full fills, and bar-based liquidation are documented in simulation rules and dataset metadata.

@@ -14,6 +14,68 @@ public sealed class InstrumentContext
     public decimal Quantity => Context.Portfolio.Positions.Where(p => p.Substrategy == Substrategy && p.Instrument == Instrument).Sum(p => p.Quantity);
     /// <summary>Gets the latest completed close, or null before any price has been observed.</summary>
     public decimal? Close => Context.History(Instrument, 1).LastOrDefault()?.Close;
+    /// <summary>Gets the latest completed high/low midpoint, or null before history exists.</summary>
+    public decimal? Midpoint => History(1).LastOrDefault() is { } bar ? (bar.High + bar.Low) / 2 : null;
+    /// <summary>Gets the default fixed notional for EnterLong and EnterShort; direct Buy/Sell quantities remain available.</summary>
+    public decimal EntryNotional { get; init; }
+    /// <summary>Gets the minimum completed history required by entry and notional-target helpers.</summary>
+    public int WarmupBars { get; init; }
+    /// <summary>Gets the signed holding implied by actual positions plus this account/instrument's pending orders.</summary>
+    public decimal ProjectedQuantity => Quantity + Context.OpenOrders
+        .Where(o => o.Request.Substrategy == Substrategy && o.Request.Instrument == Instrument).Sum(o => o.Request.Quantity);
+
+    /// <summary>Returns up to count completed bars in chronological order.</summary>
+    public IReadOnlyList<Bar> History(int count) => Context.History(Instrument, count);
+    /// <summary>Reports whether count completed bars are available without observing future prices.</summary>
+    public bool HasHistory(int count) => History(count).Count == count;
+
+    /// <summary>Replaces this market's pending orders with one delta to a signed quantity; closing auctions default to day orders.</summary>
+    public long? TargetQuantity(decimal quantity, OrderType type = OrderType.Market, TimeInForce? timeInForce = null)
+    {
+        var duration = timeInForce ?? (type == OrderType.MarketOnClose ? TimeInForce.Day : TimeInForce.GoodTillCancelled);
+        if (type is not (OrderType.Market or OrderType.MarketOnOpen or OrderType.MarketOnClose) || !Enum.IsDefined(duration) ||
+            Instrument.AssetClass == AssetClass.LinearPerpetual && type != OrderType.Market)
+            throw new ArgumentException("Position targets require a supported market or auction order.");
+        CancelOrders();
+        var delta = quantity - Quantity;
+        return delta > 0 ? Buy(delta, type, duration) : delta < 0 ? Sell(-delta, type, duration) : null;
+    }
+
+    /// <summary>Adds lots to a projected long holding or reverses a short to a new long, sized from the completed close.</summary>
+    public long? EnterLong(OrderType type = OrderType.Market, decimal? notional = null, decimal lotSize = 1m)
+        => Enter(1, type, notional ?? EntryNotional, lotSize);
+    /// <summary>Adds lots to a projected short holding or reverses a long to a new short, sized from the completed close.</summary>
+    public long? EnterShort(OrderType type = OrderType.Market, decimal? notional = null, decimal lotSize = 1m)
+        => Enter(-1, type, notional ?? EntryNotional, lotSize);
+
+    /// <summary>Validates entry sizing, waits for warmup, and submits one net delta from actual holdings.</summary>
+    private long? Enter(int side, OrderType type, decimal notional, decimal lotSize)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(notional);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lotSize);
+        ArgumentOutOfRangeException.ThrowIfNegative(WarmupBars);
+        if (!HasHistory(WarmupBars)) return null;
+        var quantity = LotsForNotional(notional, lotSize);
+        if (quantity == 0) return null;
+        var projected = ProjectedQuantity;
+        return TargetQuantity((Math.Sign(projected) == side ? projected : 0) + side * quantity, type);
+    }
+
+    /// <summary>Adjusts signed notional by whole lots when relative drift exceeds tolerance; zero flattens without warmup.</summary>
+    public long? TargetNotional(decimal notional, decimal tolerance = 0m, decimal lotSize = 1m, OrderType type = OrderType.Market)
+    {
+        if (tolerance is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(tolerance));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lotSize);
+        ArgumentOutOfRangeException.ThrowIfNegative(WarmupBars);
+        if (notional == 0) return TargetQuantity(0, type);
+        if (!HasHistory(WarmupBars) || Close is not > 0) return null;
+        var price = Close.Value;
+        var projected = ProjectedQuantity;
+        var difference = notional - projected * price;
+        var quantity = Math.Floor(Math.Abs(difference) / price / lotSize) * lotSize;
+        if (quantity == 0 || Math.Abs(difference) / Math.Abs(notional) <= tolerance) return null;
+        return TargetQuantity(projected + Math.Sign(difference) * quantity, type);
+    }
 
     /// <summary>Binds an already registered account and instrument; calendar dates default to New York or an explicit exchange zone.</summary>
     public InstrumentContext(IStrategyContext context, string substrategy, Instrument instrument, TimeZoneInfo? exchangeZone = null)
@@ -86,20 +148,16 @@ public sealed class InstrumentContext
         return quantity > 0 ? Sell(quantity, type, timeInForce) : null;
     }
 
-    /// <summary>Cancels this account/instrument's pending orders and submits a sale of its actual long holding; returns null when flat or short.</summary>
-    public long? ExitLong(OrderType type = OrderType.Market, TimeInForce timeInForce = TimeInForce.GoodTillCancelled)
+    /// <summary>Targets flat when projected holdings are long; preserves an existing exit or short intent and never waits for warmup.</summary>
+    public long? ExitLong(OrderType type = OrderType.Market, TimeInForce? timeInForce = null)
     {
-        CancelOrders();
-        var quantity = Quantity;
-        return quantity > 0 ? Sell(quantity, type, timeInForce) : null;
+        return ProjectedQuantity > 0 ? TargetQuantity(0, type, timeInForce) : null;
     }
 
-    /// <summary>Cancels this account/instrument's pending orders and buys its actual short holding; returns null when flat or long.</summary>
-    public long? ExitShort(OrderType type = OrderType.Market, TimeInForce timeInForce = TimeInForce.GoodTillCancelled)
+    /// <summary>Targets flat when projected holdings are short; preserves an existing exit or long intent and never waits for warmup.</summary>
+    public long? ExitShort(OrderType type = OrderType.Market, TimeInForce? timeInForce = null)
     {
-        CancelOrders();
-        var quantity = Quantity;
-        return quantity < 0 ? Buy(-quantity, type, timeInForce) : null;
+        return ProjectedQuantity < 0 ? TargetQuantity(0, type, timeInForce) : null;
     }
 
     /// <summary>Cancels pending orders only for this account and instrument, returning the successful cancellation count.</summary>

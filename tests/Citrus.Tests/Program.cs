@@ -865,6 +865,105 @@ Test("Bound order helpers round lots and preserve direct quantities and limits",
     True(result.Fills.Any(f => f.Quantity == 2));
     True(result.Fills.Any(f => f.Quantity == -1));
 });
+Test("Position intent reverses once and preserves pending exits across opposite-side calls", () =>
+{
+    var result = Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument, 3), onBar: (c, _) =>
+    {
+        var market = new InstrumentContext(c, "a", instrument) { EntryNotional = 250 };
+        var count = market.History(10).Count;
+        if (count == 1)
+        {
+            market.EnterShort();
+            var order = c.OpenOrders.Single();
+            Equal(-5m, order.Request.Quantity); Equal(-2m, market.ProjectedQuantity);
+            True(market.ExitLong() is null);
+            True(market.TargetNotional(-200) is null);
+            Equal(order.OrderId, c.OpenOrders.Single().OrderId);
+        }
+        if (count == 2)
+        {
+            market.EnterLong();
+            var order = c.OpenOrders.Single();
+            Equal(4m, order.Request.Quantity); Equal(2m, market.ProjectedQuantity);
+            True(market.ExitShort() is null);
+            Equal(order.OrderId, c.OpenOrders.Single().OrderId);
+        }
+    }), Data(100, 110, 120));
+    Equal("3,-5,4", string.Join(',', result.Fills.Select(f => f.Quantity)));
+    Equal(2m, result.Final.Positions.Single().Quantity);
+});
+Test("Entry warmup and notional drift use completed prices and pending lots", () =>
+{
+    Run(new CallbackStrategy(onBar: (c, _) =>
+    {
+        var market = new InstrumentContext(c, "a", instrument) { EntryNotional = 250, WarmupBars = 2 };
+        if (market.History(10).Count == 1)
+        {
+            True(market.EnterLong() is null); True(market.TargetNotional(250) is null);
+            market.Buy(1); // Explicit quantity orders remain usable during indicator warmup.
+        }
+        if (market.History(10).Count == 2)
+        {
+            market.EnterLong(); market.EnterLong();
+            Equal(5m, market.ProjectedQuantity); Equal(1, c.OpenOrders.Count);
+            True(market.TargetNotional(570, tolerance: .05m) is null);
+            market.TargetNotional(605, lotSize: .5m);
+            Equal(5.5m, market.ProjectedQuantity);
+            var order = c.OpenOrders.Single();
+            Throws<ArgumentException>(() => market.TargetQuantity(0, OrderType.Limit));
+            Throws<ArgumentException>(() => market.TargetQuantity(0, OrderType.MarketOnClose));
+            Throws<ArgumentOutOfRangeException>(() => market.EnterLong(notional: -1));
+            Throws<ArgumentOutOfRangeException>(() => market.TargetNotional(10, tolerance: -1));
+            Throws<ArgumentOutOfRangeException>(() => market.TargetNotional(10, lotSize: 0));
+            Equal(order.OrderId, c.OpenOrders.Single().OrderId);
+            market.TargetNotional(0);
+            Equal(0m, market.ProjectedQuantity);
+        }
+    }), Data(100, 110, 120));
+});
+Test("Rejected entries leave no projected holding or phantom exit", () =>
+{
+    var result = Run(new CallbackStrategy(onBar: (c, _) =>
+    {
+        var market = new InstrumentContext(c, "a", instrument) { EntryNotional = 250 };
+        if (market.History(10).Count == 1) market.EnterLong();
+        else
+        {
+            Equal(0m, market.ProjectedQuantity);
+            True(market.ExitLong() is null); True(market.ExitShort() is null);
+        }
+    }), options: new() { RejectionProbability = 1 });
+    Equal(0, result.Fills.Count);
+    Equal(1, result.Orders.Count(o => o.Status == OrderStatus.Rejected));
+});
+Test("Daily API binds accounts and respects early auctions without consuming the unfinished bar", () =>
+{
+    var path = Path.Combine(Temporary(), "Strategy.cs");
+    File.WriteAllText(path, """
+        using Citrus.Trading;
+        public sealed class Simple : DailyStrategy
+        {
+            private StrategyAccount account = null!;
+            protected override string ClockSymbol => "SCHB";
+            protected override void Initialize() => account = Account("daily", 810, "schb");
+            protected override void BeforeClose()
+            {
+                var market = account["SCHB"];
+                if (Date.Day == 29) market.EnterLong(OrderType.MarketOnClose);
+            }
+        }
+        """);
+    using var compiled = CompiledStrategy.Load(path);
+    var data = PaydayData();
+    var result = Run(compiled.Strategy, data);
+    var fill = result.Fills.Single();
+    Equal(8m, fill.Quantity);
+    var early = data.Sessions.Single(s => s.Close.Month == 11 && s.Close.Day == 29);
+    Equal(early.Close, fill.Time);
+    Equal(early.Close.AddMinutes(-1), result.Orders.First().Time);
+    Equal(TimeInForce.Day, result.Orders.First().Request.TimeInForce);
+    Equal(810m, result.Equity.First().Substrategies["daily"]);
+});
 Test("ExitLong cancels only its account and instrument and repeated calls cannot oversell", () =>
 {
     var other = instrument with { Symbol = "ETH" };

@@ -6,108 +6,99 @@ using System.Runtime.CompilerServices;
 using Citrus.Trading;
 
 /// <summary>Adapts the source portfolio to Citrus closing-auction calendar orders and next-open price signals.</summary>
-public sealed class ZorroPortfolio : IStrategy
+public sealed class ZorroPortfolio : DailyStrategy
 {
-    private sealed class Sleeve
-    {
-        public readonly decimal Allocation;
-        public readonly Dictionary<string, InstrumentContext> Markets;
-        /// <summary>Registers a fixed source account and its instrument contexts.</summary>
-        public Sleeve(IStrategyContext context, string name, decimal allocation, params string[] symbols)
-        {
-            Allocation = allocation;
-            context.Register(name, allocation / 17000m);
-            Markets = symbols.ToDictionary(s => s, s => new InstrumentContext(context, name, s));
-        }
-        public InstrumentContext this[string symbol] => Markets[symbol];
-    }
-    private Sleeve payday = null!, gold = null!, bond = null!, reversion = null!, hedge = null!, basis = null!, risk = null!, oil = null!, pair = null!;
+    private StrategyAccount payday = null!, gold = null!, bond = null!, reversion = null!, hedge = null!, basis = null!, risk = null!, oil = null!, pair = null!;
     private (double Date, double Close)[] vix = [], vix3m = [];
     private readonly List<double> volatility = [], ratios = [];
     private double? ema, previousRatio, previousEma;
-    private DateOnly? processedDate;
+    protected override string ClockSymbol => "SCHB";
+    protected override int WarmupBars => 91;
 
     /// <summary>Uses the source account and asset ordering, with natural gas disabled.</summary>
-    public void OnStart(IStrategyContext context)
+    protected override void Initialize()
     {
-        payday = new(context, "PaydaySeason", 810, "SCHB");
-        gold = new(context, "GoldSeason", 1256, "GLDM");
-        bond = new(context, "BondSeason", 2608, "TLT");
-        reversion = new(context, "EqBondReversion", 3018, "SCHB", "TLT");
-        hedge = new(context, "VIXHedge", 2094, "UVXY", "VXZ");
-        basis = new(context, "VIXBasis", 800, "SVXY", "VIXY");
-        risk = new(context, "RiskPremia", 3000, "SCHB", "GLDM", "TLT");
-        oil = new(context, "OilSeason", 1160, "UGA");
-        pair = new(context, "EqBondPair", 800, "SCHB", "TLT");
-        vix = LoadIndex(context, "VIX"); vix3m = LoadIndex(context, "VIX3M");
+        payday = Account("PaydaySeason", 810, "SCHB");
+        gold = Account("GoldSeason", 1256, "GLDM");
+        bond = Account("BondSeason", 2608, "TLT");
+        reversion = Account("EqBondReversion", 3018, "SCHB", "TLT");
+        hedge = Account("VIXHedge", 2094, "UVXY", "VXZ");
+        basis = Account("VIXBasis", 800, "SVXY", "VIXY");
+        risk = Account("RiskPremia", 3000, "SCHB", "GLDM", "TLT");
+        oil = Account("OilSeason", 1160, "UGA");
+        pair = Account("EqBondPair", 800, "SCHB", "TLT");
+        vix = LoadIndex("VIX"); vix3m = LoadIndex("VIX3M");
         volatility.Clear(); ratios.Clear(); ema = previousRatio = previousEma = null;
-        processedDate = null;
-        foreach (var session in context.Sessions.Where(s => s.Close > context.Time))
-            context.Schedule(session.Close.AddMinutes(-1), "calendar");
     }
 
     /// <summary>Evaluates completed daily-bar signals; market orders become eligible at the next open.</summary>
-    public void OnBar(IStrategyContext context, IReadOnlyList<Bar> bars)
+    protected override void OnClose()
     {
-        var date = DateOnly.FromDateTime(context.Time.UtcDateTime);
-        if (!bars.Any(b => b.Instrument == payday["SCHB"].Instrument && b.SessionClose) || processedDate == date) return;
-        if (bars.Any(b => b.SessionClose && !b.SessionOpen)) throw new InvalidOperationException("ZorroPortfolio requires daily session bars.");
-        processedDate = date;
+        var date = Date;
         var tdm = Enumerable.Range(1, date.Day).Count(d => CalendarDay(new(date.Year, date.Month, d)));
-        var spot = IndexClose(vix, context.Time); var term = IndexClose(vix3m, context.Time);
+        var tom = Enumerable.Range(1, DateTime.DaysInMonth(date.Year, date.Month)).Count(d => CalendarDay(new(date.Year, date.Month, d)));
+        var spot = IndexClose(vix, Time); var term = IndexClose(vix3m, Time);
+        EqBondReversion(tdm, tom, beforeClose: false);
+        VIXHedge();
+        VIXBasis(spot, term);
+        RiskPremia();
+        EqBondPair();
+    }
+
+    /// <summary>Trades the monthly equity-versus-bond reversion signal after the completed close.</summary>
+    private void EqBondReversion(int tdm, int tom, bool beforeClose)
+    {
+        if (beforeClose)
+        {
+            if (tdm == tom)
+            {
+                reversion["SCHB"].ExitLong(OrderType.MarketOnClose);
+                reversion["TLT"].ExitLong(OrderType.MarketOnClose);
+            }
+            return;
+        }
+        if (!payday["SCHB"].HasHistory(90) || tdm != 14) return;
+        var equities = reversion["SCHB"].History(tdm + 1);
+        var bonds = reversion["TLT"].History(tdm + 1);
+        if (equities.Count != tdm + 1 || bonds.Count != tdm + 1) return;
+        var difference = (equities[^1].Close - equities[0].Open) / equities[0].Open
+            - (bonds[^1].Close - bonds[0].Open) / bonds[0].Open;
+        if (difference > 0) reversion["TLT"].EnterLong();
+        else if (difference < 0) reversion["SCHB"].EnterLong();
+    }
+
+    /// <summary>Maintains the fixed short-volatility and medium-term-volatility hedge notionals.</summary>
+    private void VIXHedge()
+    {
+        if (!payday["SCHB"].HasHistory(90)) return;
+        hedge["UVXY"].TargetNotional(-551.052978515625m, tolerance: .05m);
+        // lite-C constant-folds 2094*(2.8/(1.+2.8)) to this float; retaining it matters at the 5% boundary.
+        hedge["VXZ"].TargetNotional(1542.949951171875m, tolerance: .05m);
+    }
+
+    /// <summary>Switches the volatility-basis allocation from the completed VIX term-structure signal.</summary>
+    private void VIXBasis(double spot, double term)
+    {
         volatility.Add(spot);
-        var eq = MeanPrice(context, pair["SCHB"]); var treas = MeanPrice(context, pair["TLT"]);
-        if (eq is > 0 && treas is > 0)
-        {
-            var ratio = Math.Log((double)(eq.Value / treas.Value));
-            ratios.Add(ratio);
-            ema = ema is null ? ratio : ema + (ratio - ema) / 3;
-        }
-        var warm = context.History(payday["SCHB"].Instrument, 90).Count == 90;
-        if (warm)
-        {
-            if (tdm == 14)
-            {
-                var eh = context.History(reversion["SCHB"].Instrument, tdm + 1);
-                var bh = context.History(reversion["TLT"].Instrument, tdm + 1);
-                if (eh.Count == tdm + 1 && bh.Count == tdm + 1)
-                {
-                    var diff = (eh[^1].Close - eh[0].Open) / eh[0].Open - (bh[^1].Close - bh[0].Open) / bh[0].Open;
-                    if (diff > 0) Enter(reversion, "TLT", 1); else if (diff < 0) Enter(reversion, "SCHB", 1);
-                }
-            }
-            Target(hedge["UVXY"], -551.052978515625m);
-            // lite-C constant-folds 2094*(2.8/(1.+2.8)) to this float; retaining it matters at the 5% boundary.
-            Target(hedge["VXZ"], 1542.949951171875m);
-            if (term > 0 && volatility.Count >= 60)
-            {
-                var sample = volatility.TakeLast(60).ToArray(); var mean = sample.Average();
-                var vol = Math.Sqrt(sample.Sum(x => (x - mean) * (x - mean)) / 60 * 252);
-                var low = term < 15 ? .85 : term < 17 ? .9 : term < 20 ? .95 : term < 25 ? 1 : 1.1;
-                var high = vol < 20 ? low : 1.1;
-                if (spot / term < low) { Exit(basis["VIXY"], 1); Target(basis["SVXY"], 800); }
-                else if (spot / term > high) { Exit(basis["SVXY"], 1); Target(basis["VIXY"], 800); }
-                else { Exit(basis["VIXY"], 1); Exit(basis["SVXY"], 1); }
-            }
-            RiskPremia(context);
-            if (ema is not null && previousEma is not null && ratios.Count > 0)
-            {
-                var ratio = ratios[^1];
-                if (previousRatio >= previousEma && ratio < ema) { Enter(pair, "SCHB", 1); Exit(pair["TLT"], 1); }
-                else if (previousRatio <= previousEma && ratio > ema) { Enter(pair, "TLT", 1); Exit(pair["SCHB"], 1); }
-            }
-        }
-        previousRatio = ratios.Count == 0 ? null : ratios[^1]; previousEma = ema;
+        if (!payday["SCHB"].HasHistory(90) || term <= 0 || volatility.Count < 60) return;
+        var sample = volatility.TakeLast(60).ToArray(); var mean = sample.Average();
+        var vol = Math.Sqrt(sample.Sum(x => (x - mean) * (x - mean)) / 60 * 252);
+        var low = term < 15 ? .85 : term < 17 ? .9 : term < 20 ? .95 : term < 25 ? 1 : 1.1;
+        var high = vol < 20 ? low : 1.1;
+        if (spot / term < low) { basis["VIXY"].ExitLong(); basis["SVXY"].TargetNotional(800, tolerance: .05m); }
+        else if (spot / term > high) { basis["SVXY"].ExitLong(); basis["VIXY"].TargetNotional(800, tolerance: .05m); }
+        else { basis["VIXY"].ExitLong(); basis["SVXY"].ExitLong(); }
     }
 
     /// <summary>Preserves the source's skipped volatility slot and Assets ordering; missing slot is explicitly zero.</summary>
-    private void RiskPremia(IStrategyContext context)
+    private void RiskPremia()
     {
+        if (!payday["SCHB"].HasHistory(90)) return;
         var weights = new double[3];
         foreach (var i in new[] { 0, 2 })
         {
             var market = risk[i == 0 ? "SCHB" : "GLDM"];
-            var h = context.History(market.Instrument, 91);
+            var h = market.History(91);
             if (h.Count == 0) return;
             var returns = h.Zip(h.Skip(1), (a, b) => (double)(b.Close / a.Close - 1)).ToList();
             if (h.Count < 91) returns.Insert(0, (double)(h[0].Close / h[0].Open - 1));
@@ -118,80 +109,75 @@ public sealed class ZorroPortfolio : IStrategy
         }
         var factor = Math.Min(1, 1 / weights.Sum());
         var symbols = new[] { "SCHB", "GLDM", "TLT" };
-        for (var i = 0; i < 3; i++) if (weights[i] > 0) Target(risk[symbols[i]], (decimal)(weights[i] * factor) * risk.Allocation);
+        for (var i = 0; i < 3; i++) if (weights[i] > 0) risk[symbols[i]].TargetNotional((decimal)(weights[i] * factor) * risk.Allocation, tolerance: .05m);
+    }
+
+    /// <summary>Updates and trades the equity-versus-bond midpoint crossover after the completed close.</summary>
+    private void EqBondPair()
+    {
+        var equities = pair["SCHB"].Midpoint; var bonds = pair["TLT"].Midpoint;
+        if (equities is > 0 && bonds is > 0)
+        {
+            var ratio = Math.Log((double)(equities.Value / bonds.Value));
+            ratios.Add(ratio);
+            ema = ema is null ? ratio : ema + (ratio - ema) / 3;
+        }
+        if (payday["SCHB"].HasHistory(90) && ema is not null && previousEma is not null && ratios.Count > 0)
+        {
+            var ratio = ratios[^1];
+            if (previousRatio >= previousEma && ratio < ema) { pair["SCHB"].EnterLong(); pair["TLT"].ExitLong(); }
+            else if (previousRatio <= previousEma && ratio > ema) { pair["TLT"].EnterLong(); pair["SCHB"].ExitLong(); }
+        }
+        previousRatio = ratios.Count == 0 ? null : ratios[^1]; previousEma = ema;
     }
 
     /// <summary>Submits calendar-known trades one minute before the auction using only previously completed prices.</summary>
-    public void OnScheduled(IStrategyContext context, string name)
+    protected override void BeforeClose()
     {
-        if (name != "calendar" || context.History(payday["SCHB"].Instrument, 90).Count < 90) return;
-        var date = DateOnly.FromDateTime(context.Time.UtcDateTime);
+        if (!payday["SCHB"].HasHistory(90)) return;
+        var date = Date;
         var tdm = Enumerable.Range(1, date.Day).Count(d => CalendarDay(new(date.Year, date.Month, d)));
         var tom = Enumerable.Range(1, DateTime.DaysInMonth(date.Year, date.Month)).Count(d => CalendarDay(new(date.Year, date.Month, d)));
-        const OrderType close = OrderType.MarketOnClose;
-        if (tdm is 8 or 16) Enter(payday, "SCHB", 1, close);
-        if (tdm == 12 || tdm == tom) Exit(payday["SCHB"], 1, close);
-        if (date.DayOfWeek == DayOfWeek.Thursday) Enter(gold, "GLDM", 1, close); else Exit(gold["GLDM"], 1, close);
-        if (tdm == tom - 7) Enter(bond, "TLT", 1, close);
-        if (tdm == tom) Enter(bond, "TLT", -1, close);
-        if (tdm == 7) Exit(bond["TLT"], -1, close);
-        if (tdm == tom) { Exit(reversion["SCHB"], 1, close); Exit(reversion["TLT"], 1, close); }
-        if (Holiday(WeekdayOffset(date, 5))) Enter(oil, "UGA", 1, close);
-        if (Holiday(WeekdayOffset(date, 2))) Exit(oil["UGA"], 1, close);
-        if (Holiday(WeekdayOffset(date, 1))) Enter(oil, "UGA", -1, close);
-        if (Holiday(WeekdayOffset(date, -1))) Exit(oil["UGA"], -1, close);
+        PaydaySeason(tdm, tom);
+        GoldSeason(date);
+        BondSeason(tdm, tom);
+        EqBondReversion(tdm, tom, beforeClose: true);
+        OilSeason(date);
     }
 
-    /// <summary>Adds source-sized lots on the same side or reverses to the requested side with one net order.</summary>
-    private static void Enter(Sleeve sleeve, string symbol, int side, OrderType type = OrderType.Market)
+    /// <summary>Trades the source payday entry and exit dates at the closing auction.</summary>
+    private void PaydaySeason(int tdm, int tom)
     {
-        var market = sleeve[symbol];
-        if (market.Context.History(market.Instrument, 91).Count < 91 || market.Close is not > 0) return;
-        var quantity = Math.Floor(sleeve.Allocation / market.Close.Value);
-        if (quantity <= 0) return;
-        var projected = Projected(market);
-        SetQuantity(market, (Math.Sign(projected) == side ? projected : 0) + side * quantity, type);
+        if (tdm is 8 or 16) payday["SCHB"].EnterLong(OrderType.MarketOnClose);
+        if (tdm == 12 || tdm == tom) payday["SCHB"].ExitLong(OrderType.MarketOnClose);
     }
 
-    /// <summary>Includes accepted unfilled orders when evaluating this account's intended holding.</summary>
-    private static decimal Projected(InstrumentContext market) => market.Quantity + market.Context.OpenOrders
-        .Where(o => o.Request.Substrategy == market.Substrategy && o.Request.Instrument == market.Instrument).Sum(o => o.Request.Quantity);
-
-    /// <summary>Replaces this market's outstanding intent with a single delta from its actual filled position.</summary>
-    private static void SetQuantity(InstrumentContext market, decimal desired, OrderType type)
+    /// <summary>Holds gold from each Thursday close until the following session close.</summary>
+    private void GoldSeason(DateOnly date)
     {
-        market.CancelOrders();
-        var delta = desired - market.Quantity;
-        var duration = type == OrderType.MarketOnClose ? TimeInForce.Day : TimeInForce.GoodTillCancelled;
-        if (delta > 0) market.Buy(delta, type, duration); else if (delta < 0) market.Sell(-delta, type, duration);
+        if (date.DayOfWeek == DayOfWeek.Thursday) gold["GLDM"].EnterLong(OrderType.MarketOnClose);
+        else gold["GLDM"].ExitLong(OrderType.MarketOnClose);
     }
 
-    /// <summary>Closes only the specified projected side without cancelling an exit already moving it to flat.</summary>
-    private static void Exit(InstrumentContext market, int side, OrderType type = OrderType.Market)
+    /// <summary>Runs the month-end bond long/short sequence at closing auctions.</summary>
+    private void BondSeason(int tdm, int tom)
     {
-        if (Math.Sign(Projected(market)) == side) SetQuantity(market, 0, type);
+        if (tdm == tom - 7) bond["TLT"].EnterLong(OrderType.MarketOnClose);
+        if (tdm == tom) bond["TLT"].EnterShort(OrderType.MarketOnClose);
+        if (tdm == 7) bond["TLT"].ExitShort(OrderType.MarketOnClose);
     }
 
-    /// <summary>Applies five-percent notional drift using completed prices and pending quantities.</summary>
-    private static void Target(InstrumentContext market, decimal target)
+    /// <summary>Trades the long and short oil holiday windows at closing auctions.</summary>
+    private void OilSeason(DateOnly date)
     {
-        if (market.Context.History(market.Instrument, 91).Count < 91 || market.Close is not > 0) return;
-        var projected = Projected(market);
-        var diff = target - projected * market.Close.Value;
-        var qty = Math.Floor(Math.Abs(diff) / market.Close.Value);
-        if (qty <= 0 || Math.Abs(diff) / Math.Abs(target) <= .05m) return;
-        SetQuantity(market, projected + Math.Sign(diff) * qty, OrderType.Market);
+        if (Holiday(WeekdayOffset(date, 5))) oil["UGA"].EnterLong(OrderType.MarketOnClose);
+        if (Holiday(WeekdayOffset(date, 2))) oil["UGA"].ExitLong(OrderType.MarketOnClose);
+        if (Holiday(WeekdayOffset(date, 1))) oil["UGA"].EnterShort(OrderType.MarketOnClose);
+        if (Holiday(WeekdayOffset(date, -1))) oil["UGA"].ExitShort(OrderType.MarketOnClose);
     }
 
     /// <summary>Uses Zorro's unconfigured global Holidays array, separately from the oil helper.</summary>
     private static bool CalendarDay(DateOnly d) => d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) && !(d.Month == 1 && d.Day == 1 || d.Month == 12 && d.Day == 25);
-
-    /// <summary>Reconstructs the daily high/low midpoint used by price() from the source bar.</summary>
-    private static decimal? MeanPrice(IStrategyContext context, InstrumentContext market)
-    {
-        var b = context.History(market.Instrument, 1).LastOrDefault();
-        return b is null ? null : (b.High + b.Low) / 2;
-    }
 
     /// <summary>Shifts dates by weekdays, counting holidays as weekdays.</summary>
     private static DateOnly WeekdayOffset(DateOnly d, int n)
@@ -218,9 +204,9 @@ public sealed class ZorroPortfolio : IStrategy
     }
 
     /// <summary>Loads source index records from snapshots beside the strategy, retaining their original timestamps.</summary>
-    private static (double Date, double Close)[] LoadIndex(IStrategyContext context, string symbol, [CallerFilePath] string source = "")
+    private (double Date, double Close)[] LoadIndex(string symbol, [CallerFilePath] string source = "")
     {
-        var bytes = context.ExternalData(symbol, () => File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(source)!, "Data", symbol + ".t6")));
+        var bytes = Context.ExternalData(symbol, () => File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(source)!, "Data", symbol + ".t6")));
         return Enumerable.Range(0, bytes.Length / 32).Select(i => (BitConverter.ToDouble(bytes, i * 32), (double)BitConverter.ToSingle(bytes, i * 32 + 20))).OrderBy(r => r.Item1).ToArray();
     }
 

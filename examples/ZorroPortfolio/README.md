@@ -2,6 +2,12 @@
 
 This strategy adapts the nine enabled sleeves from `cq_Alpaca_Portfolio.c` to the normal Citrus fill model. `SeasonalityRiskPremia` remains a separate example with different trading rules. No Zorro execution toggle, immediate completed-close fill, tick-rounding override, or future-candle extrapolation remains in the engine.
 
+## Strategy API
+
+The strategy now derives from `DailyStrategy`: `Initialize` declares its accounts, `OnClose` evaluates completed-price signals, and `BeforeClose` handles calendar trades. Account-bound calls such as `gold["GLDM"].EnterLong(OrderType.MarketOnClose)` and `hedge["UVXY"].TargetNotional(amount, tolerance: .05m)` replace its custom sleeve and position-management helpers. `WarmupBars = 91` preserves its entry warmup; the source's separate 90-bar signal condition remains explicit.
+
+The API refactor reproduced all 2,637 fills, all order events and the complete summary exactly on the comparison dataset below. Signal mathematics, source-specific calendar rules and index-file interpretation remain in the strategy.
+
 ## Execution
 
 Calendar-known trades (payday, gold, bond, oil, and the reversion sleeve's month-end exit) are submitted one minute before the scheduled session close as day-only market-on-close orders. Sizing uses the preceding completed daily close. The session calendar supplies auction times, including early closes; it does not supply prices.

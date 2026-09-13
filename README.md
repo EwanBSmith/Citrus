@@ -114,7 +114,38 @@ The strategy runs once at each session close and inspects `market.TradingDay(1)`
 
 ## Concise strategy API
 
-Derive from `InstrumentStrategy` for one account/instrument. Its constructor registers capital and the host forwards only that instrument's bars to `OnBar(InstrumentContext market, Bar bar)`. For several instruments or substrategies, use `IStrategy` and construct an `InstrumentContext` for each registered account/instrument during startup.
+For daily equity portfolios, derive from `DailyStrategy`. Declare a `ClockSymbol`, create accounts in `Initialize`, and write rules in `OnClose` or `BeforeClose`. The base class handles symbol binding, session scheduling and callback dispatch. For example:
+
+```csharp
+using System;
+using Citrus.Trading;
+
+public sealed class ThursdayGold : DailyStrategy
+{
+    private StrategyAccount gold = null!;
+    protected override string ClockSymbol => "GLDM";
+
+    protected override void Initialize()
+        => gold = Account("GoldSeason", 1256, "GLDM");
+
+    protected override void BeforeClose()
+    {
+        var market = gold["GLDM"];
+        if (Date.DayOfWeek == DayOfWeek.Thursday)
+            market.EnterLong(OrderType.MarketOnClose);
+        else
+            market.ExitLong(OrderType.MarketOnClose);
+    }
+}
+```
+
+`Account` reserves the specified amount of starting capital and uses that fixed amount as each instrument's default entry notional; allocations must fit within starting cash. Account symbols are case-insensitive. `EnterLong`/`EnterShort` add whole lots on the same side or reverse an opposing projected holding with one net order. They use completed prices; they do not immediately change actual holdings. Repeated entries deliberately add exposure. Use `TargetQuantity` or `TargetNotional` for position targets instead. `TargetNotional(800, tolerance: .05m)` trades only when notional drift exceeds 5%, counting pending orders; a zero target flattens. Notional helpers accept a lot size, while `Buy` and `Sell` remain direct quantity operations.
+
+Override `WarmupBars` to delay entry and nonzero notional-target helpers until that instrument has enough completed bars. Callbacks still run during warmup so indicators can initialize; exits and explicit quantity orders remain available. `market.History(count)`, `market.HasHistory(count)`, `market.Close` and `market.Midpoint` expose completed data without repeating context/instrument arguments.
+
+`OnClose` runs once for each completed daily session of `ClockSymbol`; market orders fill at a subsequent open. `BeforeClose` runs one minute before each supplied session close, including early closes, and can submit an explicit `MarketOnClose` order (day-only by default). Neither hook can see an unfinished bar. `Time` and `Date` are UTC. `DailyStrategy` requires daily equity session bars; for other intervals or instruments use the APIs below. Optional protected `OnFill`, `OnOrderUpdate`, `OnScheduled` and `OnStop` hooks retain notifications and access to `Context`. Reset strategy-owned state in `Initialize` because a strategy instance can be reused.
+
+Derive from `InstrumentStrategy` for one account/instrument. Its constructor registers capital and the host forwards only that instrument's bars to `OnBar(InstrumentContext market, Bar bar)`. For other multi-instrument workflows, use `IStrategy` and construct an `InstrumentContext` for each registered account/instrument during startup.
 
 ```csharp
 var next = market.TradingDay(1);
@@ -126,7 +157,7 @@ if (next?.DayOfMonth is 8 or 16)
 
 `Buy(quantity)` and `Sell(quantity)` remain direct additional-unit orders. Both accept execution type, time-in-force, and an optional limit price. `BuyNotional` and `SellNotional` size additional orders from completed prices; `LotsForNotional` exposes the calculation and accepts a lot size (default one, or e.g. `0.001m` for fractional units). Missing history or an unaffordable lot produces no notional order. `Quantity` reads actual holdings and `Close` reads the latest completed price.
 
-`ExitLong` and `ExitShort` cancel pending orders for that account/instrument and close only its actual holding on the requested side; calling them while flat cannot open an opposite position. Repeated exits replace the pending exit, rather than duplicating its quantity. `CancelOrders` is also available explicitly. Orders use the existing execution, margin, costs, rejection, and attribution rules. For scheduling, portfolio access, or advanced orders, use `market.Context`; the original `IStrategy` API remains available.
+`ExitLong` and `ExitShort` target flat only when the projected holding is on the requested side. They replace matching pending intent with a delta from actual holdings, while preserving an existing exit or opposite-side intent. Repeated or opposite-side exit calls cannot cancel an already pending close. `TargetQuantity(0)` unconditionally targets flat. `CancelOrders` is also available explicitly. Orders use the existing execution, margin, costs, rejection, and attribution rules. For scheduling, portfolio access, or advanced orders, use `market.Context`; the original `IStrategy` API remains available.
 
 ## Market datasets
 
