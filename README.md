@@ -1,6 +1,6 @@
 # Citrus
 
-Citrus is a .NET 10 backtesting engine for trusted external C# strategy projects and assemblies. It runs on Windows, macOS, and Linux, with simulated equities and linear perpetuals, portfolio order netting, separate substrategy accounting, and JSON/CSV results.
+Citrus is a .NET 10 backtesting engine for trusted C# strategies, with strategy development in the main solution and support for external projects and assemblies. It runs on Windows, macOS, and Linux, with simulated equities and linear perpetuals, portfolio order netting, separate substrategy accounting, and JSON/CSV results.
 
 ## Build and verify
 
@@ -113,29 +113,16 @@ Alpaca downloads read saved credentials on each invocation. Nonempty `APCA_API_K
 ```sh
 # Point automated/example runs at an isolated main cache (PowerShell: $env:CITRUS_HISTORICAL_DATA="artifacts/cache")
 export CITRUS_HISTORICAL_DATA="artifacts/cache"
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/perpetual-generation.json artifacts/cache/perpetual-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/PerpetualTrend/GenerateData.json artifacts/cache/perpetual-data.json
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- validate examples/PerpetualTrend/Strategy.cs
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/PerpetualTrend
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/equity-generation.json artifacts/cache/equity-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/EquityHold/GenerateData.json artifacts/cache/equity-data.json
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/EquityHold
 ```
 
 Rerunning a backtest overwrites its result files in the configured output directory. Data commands also overwrite their output file, so the example commands can be rerun as written. Other files in the result directory are retained. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
 
 The perpetual example has a trend substrategy and a holding substrategy with 70/30 capital allocation. The equity example demonstrates next-session opening orders across a weekend and the US daylight-saving transition. Generated prices have zero funding unless supplementary funding events are added.
-
-## Payday seasonality
-
-`examples/PaydaySeasonality/Strategy.cs` ports the supplied Zorro `PaydaySeason` rules: buy SCHB on trading sessions 8 and 16, sell its entire long holding on session 12 and the last session of each month. Each entry buys `floor(810 / preceding session close)` whole shares; the $810 notional is fixed, not compounded. Edit the strategy constructor or `BuyNotional` amount to change the instrument or allocation. The run starts with $1,000 to leave a cash buffer for price movement and costs.
-
-```sh
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data download examples/payday-download.json artifacts/payday-data.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/PaydaySeasonality
-```
-
-The download configuration writes through `artifacts/cache`; point `CITRUS_HISTORICAL_DATA` there for this example, or remove its `cache` field to use the configured main cache. The download must finish before opening the run. Supply **complete exchange-calendar months** in `sessions`: trading-day counts use that calendar, not observed bar counts or weekdays. Missing calendar sessions silently change the strategy dates; the strategy cannot establish calendar completeness itself. The example requests daily bars for November and December 2024. A partial bar range can use a full-month calendar, but must not truncate that calendar. Only one shared exchange calendar is currently supported by the framework.
-
-The strategy runs once at each session close and inspects `market.TradingDay(1)`, the next exchange session. Signals on days 7, 11, 15 and the penultimate session submit day-only market-on-close orders for days 8, 12, 16 and month end. The engine has already processed the signal day's auction and expiry before `OnBar`, so these orders remain eligible for the following auction, including early closes. Daily data is sufficient: dates match the intended Zorro windows, but sizing uses the preceding close instead of the original 15:30 price. Hourly datasets still work and use only their final daily bars. No 90-bar warmup is needed. Start before a required signal day; starting on an entry date does not retroactively submit its order. Entries without an affordable share are skipped; rejected entries cannot create a short exit. Rejected orders are not retried. A run ending before an exit date leaves the position open.
 
 ## Concise strategy API
 
@@ -233,15 +220,17 @@ Strategies run as **trusted local code**, with normal process permissions, libra
 
 ## Market data
 
+Use the desktop historical-data dialog, or supply your own provider download configuration to the CLI (the paths below are placeholders).
+
 ```sh
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data download examples/alpaca-download.json artifacts/alpaca-data.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data download examples/hyperliquid-download.json artifacts/hyperliquid-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data download path/to/alpaca-download.json artifacts/alpaca-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data download path/to/hyperliquid-download.json artifacts/hyperliquid-data.json
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data import artifacts/alpaca-data.json artifacts/combined.json supplement.json
 ```
 
-Configure Alpaca credentials through **Settings → Global settings**, or set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the environment. Keep credentials out of run and download JSON files; the private per-user global file is the only configuration intended to store them. Hyperliquid public historical data requires no key. Download commands are opt-in network operations; the normal tests do not invoke them. Update the Hyperliquid example's date range to available completed history.
+Configure Alpaca credentials through **Settings → Global settings**, or set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the environment. Keep credentials out of run and download JSON files; the private per-user global file is the only configuration intended to store them. Hyperliquid public historical data requires no key. Download commands are opt-in network operations; the normal tests do not invoke them. Use a date range within available completed history.
 
-Alpaca supplies exchange calendar sessions, adjusted minute bars (`adjustment=all`) aggregated into regular-session hourly/daily bars. Hourly buckets start at the session open, with a shorter final bucket where necessary. Missing no-trade minutes are not synthesized, but every expected hourly/daily bucket must contain data. IEX is the example feed; configure `feed` for your account's entitlement. Some instruments have entire sessions without IEX bars. These gaps fail coverage validation and the error lists the missing dates; an entitled SIP feed or imported history may supply the missing coverage. The calendar includes holidays, daylight-saving changes, and early closes. User-imported equity datasets must provide explicit UTC sessions and correct opening/closing flags.
+Alpaca supplies exchange calendar sessions, adjusted minute bars (`adjustment=all`) aggregated into regular-session hourly/daily bars. Hourly buckets start at the session open, with a shorter final bucket where necessary. Missing no-trade minutes are not synthesized, but every expected hourly/daily bucket must contain data. IEX is the default feed; configure `feed` for your account's entitlement. Some instruments have entire sessions without IEX bars. These gaps fail coverage validation and the error lists the missing dates; an entitled SIP feed or imported history may supply the missing coverage. The calendar includes holidays, daylight-saving changes, and early closes. User-imported equity datasets must provide explicit UTC sessions and correct opening/closing flags.
 
 Hyperliquid downloads hourly/daily candles and paginated funding rates. Its API supplies only the latest 5,000 candles; missing history fails with a coverage error. Import older data and merge datasets instead of silently shortening the requested period. Its funding history does not include historical mark prices: the adapter uses the latest completed candle close, or the first open at dataset start. This approximation is recorded in dataset notes and the manifest; import funding events with explicit historical marks for exact funding notionals.
 

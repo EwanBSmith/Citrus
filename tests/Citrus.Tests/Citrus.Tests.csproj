@@ -1,1 +1,14 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Remove="Fixtures/**/*.cs" /><ProjectReference Include="../../src/Citrus.Engine/Citrus.Engine.csproj" /><None Include="Fixtures/PaydaySeasonality.cs" Link="PaydaySeasonality.cs" CopyToOutputDirectory="PreserveNewest" /><None Include="Fixtures/SeasonalityRiskPremia.cs" Link="SeasonalityRiskPremia.cs" CopyToOutputDirectory="PreserveNewest" /><None Include="Fixtures/Data/*.csv" Link="Data/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /><None Include="../../examples/ZorroPortfolio/Strategy.cs" Link="ZorroPortfolio.cs" CopyToOutputDirectory="PreserveNewest" /><None Include="../../examples/ZorroPortfolio/Data/*.t6" Link="Data/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Fixtures/**/*.cs" />
+    <ProjectReference Include="../../src/Citrus.Engine/Citrus.Engine.csproj" />
+    <None Include="Fixtures/PaydaySeasonality.cs" Link="PaydaySeasonality.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures/SeasonalityRiskPremia.cs" Link="SeasonalityRiskPremia.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures/Data/*.csv" Link="Data/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../examples/ZorroPortfolio/Strategy.cs" Link="ZorroPortfolio.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../examples/ZorroPortfolio/Data/*.t6" Link="Data/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

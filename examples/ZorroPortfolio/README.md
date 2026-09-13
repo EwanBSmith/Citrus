@@ -1,6 +1,6 @@
 # Zorro portfolio using Citrus execution
 
-This strategy adapts the nine enabled sleeves from `cq_Alpaca_Portfolio.c` to the normal Citrus fill model. `SeasonalityRiskPremia` remains a separate example with different trading rules. No Zorro execution toggle, immediate completed-close fill, tick-rounding override, or future-candle extrapolation remains in the engine.
+This strategy adapts the nine enabled sleeves from `cq_Alpaca_Portfolio.c` to the normal Citrus fill model. This source is retained as a regression example; develop the current portfolio in `src/Citrus.Strategies/ZorroPortfolio.cs`. The retired `SeasonalityRiskPremia` source remains only as a test fixture. No Zorro execution toggle, immediate completed-close fill, tick-rounding override, or future-candle extrapolation remains in the engine.
 
 ## Strategy API
 
@@ -33,7 +33,7 @@ Verified locally on 13 September 2026 with adjusted Alpaca SIP OHLC, 1,471 daily
 
 Daily-return correlation is 0.9836. Final equity is $338.92 lower (1.45% of the old final equity; net profit is 5.35% lower). The native result includes unrealized P&L on open final holdings; the old run forced them closed. This demonstrates similar behaviour on this history, not exact fills or a prediction of future performance. Standard spread/slippage/commission settings remain available for cost assumptions.
 
-The former $38,381.34 parity figure used a different March 2010–September 2026 Zorro T6 dataset and compatibility execution. It is not the benchmark for this shorter Alpaca run.
+The former $38,381.34 parity figure used a different March 2010 to September 2026 Zorro T6 dataset and compatibility execution. It is not the benchmark for this shorter Alpaca run.
 
 ## Running
 
