@@ -6,8 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Citrus.Engine/Citrus.Engine.csproj" />
-    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
     <PackageReference Include="ScottPlot.WPF" Version="5.1.59" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.9.0" />
   </ItemGroup>
 </Project>

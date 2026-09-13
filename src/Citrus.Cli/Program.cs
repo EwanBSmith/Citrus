@@ -10,8 +10,9 @@ try
     {
         Console.WriteLine("""
         Citrus: deterministic backtesting with trusted C# strategies
-          validate <strategy-folder | strategy.cs> [reference.dll ...]
+          validate <strategy-folder | run.json | strategy.cs> [reference.dll ...]
           backtest <strategy-folder> [backtest-name] (legacy run.json also accepted)
+          replay <results-folder> (uses captured strategy artifacts and historical-data.json)
           data generate <generation.json> <output.json>
           data import <dataset.json> <output.json> [supplement.json ...]
           data download <download.json> <output.json>
@@ -21,26 +22,28 @@ try
     }
     if (args[0] == "validate" && args.Length >= 2)
     {
-        var folderConfig = Directory.Exists(args[1]) ? StrategyFolder.ConfigurationPath(args[1]) : null;
+        var folderConfig = Directory.Exists(args[1]) || Path.GetExtension(args[1]) == ".json" ? StrategyFolder.ConfigurationPath(args[1]) : null;
         var configuration = folderConfig is null ? null : StrategyFolder.Read(folderConfig);
-        using var compiled = CompiledStrategy.Load(folderConfig is null ? args[1] : StrategyFolder.Source(folderConfig, configuration!),
-            (configuration?.References.Select(p => StrategyFolder.Resolve(folderConfig!, p)) ?? []).Concat(args.Skip(2)));
+        using var compiled = folderConfig is null ? CompiledStrategy.Load(args[1], args.Skip(2))
+            : CompiledStrategy.LoadConfiguration(folderConfig, configuration! with { References = configuration!.References.Concat(args.Skip(2).Select(Path.GetFullPath)).ToArray() });
         Console.WriteLine($"Valid strategy: {compiled.Strategy.GetType().Name}"); return 0;
     }
-    if (args[0] == "backtest" && args.Length is 2 or 3)
+    if (args[0] == "backtest" && args.Length is 2 or 3 || args[0] == "replay" && args.Length == 2)
     {
-        var configPath = StrategyFolder.ConfigurationPath(args[1], args.Length == 3 ? args[2] : null);
+        var replay = args[0] == "replay";
+        var configPath = replay ? Path.GetFullPath(Path.Combine(args[1], "run.json")) : StrategyFolder.ConfigurationPath(args[1], args.Length == 3 ? args[2] : null);
         // Return an absolute path using the configuration directory as the base for relative paths.
         string Resolve(string path) => StrategyFolder.Resolve(configPath, path);
         var config = StrategyFolder.Read(configPath);
-        var strategy = StrategyFolder.Source(configPath, config); var output = Resolve(config.Output);
-        var data = DataCache.Load(GlobalConfiguration.Load().ResolveHistoricalDataDirectory(), config.Interval, config.Start, config.End);
+        var output = Resolve(config.Output);
+        var data = replay ? Json.Read<MarketDataset>(Path.Combine(Path.GetDirectoryName(configPath)!, "historical-data.json"))
+            : DataCache.Load(GlobalConfiguration.Load().ResolveHistoricalDataDirectory(), config.Interval, config.Start, config.End);
         Directory.CreateDirectory(output);
         var dataPath = Path.Combine(output, "historical-data.json");
         Json.Write(dataPath, data);
-        using var compiled = CompiledStrategy.Load(strategy, config.References.Select(Resolve));
+        using var compiled = CompiledStrategy.LoadConfiguration(configPath, config);
         var result = new BacktestEngine().Run(compiled.Strategy, data, config);
-        Reports.Export(output, result, config, data, strategy, dataPath, compiled.DependencyHashes);
+        Reports.Export(output, result, config, data, compiled.InputPath, dataPath, compiled.DependencyHashes, compiled);
         Console.WriteLine($"Completed: {result.Fills.Count} attributed fills; final equity {result.Final.Equity.ToString("F2", CultureInfo.InvariantCulture)}. Results: {output}"); return 0;
     }
     if (args.Length >= 4 && args[0] == "data")

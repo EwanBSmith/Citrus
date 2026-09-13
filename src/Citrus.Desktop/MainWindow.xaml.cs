@@ -13,7 +13,6 @@ public partial class MainWindow : Window
     private string? configPath;
     private string? strategyPath;
     private string? outputPath;
-    private bool strategyDirty;
     private bool configDirty;
     private bool loading;
     private bool busy;
@@ -29,14 +28,13 @@ public partial class MainWindow : Window
         grids = new() { ["Orders"] = orders, ["Fills"] = fills, ["Positions"] = positions,
             ["Costs"] = costs, ["Equity"] = equity, ["Attribution"] = attribution };
         foreach (var grid in grids.Values) grid.AutoGeneratingColumn += BindResultColumn;
-        strategyEditor.SourceChanged += (_, _) => { if (!loading) strategyDirty = true; UpdateTitle(); };
         configEditor.ConfigurationChanged += (_, _) =>
         {
-            if (!loading) { configDirty = true; RefreshEditorReferences(); }
+            if (!loading) configDirty = true;
             UpdateTitle();
         };
         Closing += OnClosing;
-        Closed += (_, _) => { strategyEditor.Dispose(); chart.Dispose(); ClearTables(); };
+        Closed += (_, _) => { chart.Dispose(); ClearTables(); };
         if (initialPath is not null) Loaded += (_, _) => Guard(() => LoadConfiguration(initialPath));
     }
 
@@ -67,6 +65,7 @@ public partial class MainWindow : Window
         switch (e.Parameter as string)
         {
             case "Open": Open(); break;
+            case "IDE": OpenDevelopmentEnvironment(); break;
             case "Example": CreateExample(); break;
             case "Save": SaveAll(); break;
             case "Validate": _ = ValidateAsync(); break;
@@ -76,7 +75,7 @@ public partial class MainWindow : Window
             case "History": new HistoricalDataWindow(historicalDataDirectory) { Owner = this }.ShowDialog(); break;
             case "Settings": new GlobalSettingsWindow { Owner = this }.ShowDialog(); break;
             case "Exit": Close(); break;
-            case "About": MessageBox.Show(this, "Citrus Backtesting Workbench\nWPF • AvalonEdit • .NET 10\n\nEdit trusted C# strategies and run deterministic backtests.\nAll result timestamps are UTC.", "About Citrus"); break;
+            case "About": MessageBox.Show(this, "Citrus Backtesting Workbench\nWPF • .NET 10\n\nRun trusted external C# strategies and analyse deterministic backtests.\nAll result timestamps are UTC.", "About Citrus"); break;
         }
     });
 
@@ -158,22 +157,20 @@ public partial class MainWindow : Window
     {
         var fullPath = StrategyFolder.ConfigurationPath(path);
         var configuration = StrategyFolder.Read(fullPath);
-        var sourcePath = StrategyFolder.Source(fullPath, configuration);
-        var source = File.ReadAllText(sourcePath);
+        var sourcePath = StrategyFolder.Input(fullPath, configuration);
+        if (!File.Exists(sourcePath)) throw new FileNotFoundException("Strategy input was not found.", sourcePath);
         if (!ConfirmEdits()) return;
         // Re-read after saving in case the selected run is the currently edited document.
         configuration = StrategyFolder.Read(fullPath);
-        sourcePath = StrategyFolder.Source(fullPath, configuration);
-        source = File.ReadAllText(sourcePath);
+        sourcePath = StrategyFolder.Input(fullPath, configuration);
         loading = true;
         try
         {
             configEditor.LoadConfiguration(configuration); configEditor.ConfigurationPath = fullPath;
-            strategyEditor.LoadSource(source, sourcePath, configuration.References.Select(p => BacktestWorkspace.Resolve(fullPath, p)).ToArray());
         }
         finally { loading = false; }
         configPath = fullPath; strategyPath = sourcePath; RefreshBacktests();
-        configDirty = strategyDirty = false;
+        configDirty = false;
         ClearResults(); UpdateTitle();
         status.Text = fullPath;
         AppendLog("Opened " + fullPath);
@@ -186,12 +183,12 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) LoadConfiguration(BacktestWorkspace.CreateExample(dialog.FolderName, historicalDataDirectory));
     }
 
-    /// <summary>Saves valid configuration JSON and the source document currently shown in the editor.</summary>
+    /// <summary>Saves validated backtest settings; strategy source belongs to the external IDE.</summary>
     private void SaveAll()
     {
         if (configPath is null || strategyPath is null) throw new InvalidOperationException("Open a run configuration or create an example first.");
         var configuration = configEditor.ReadConfiguration();
-        if (strategyDirty) { File.WriteAllText(strategyPath, strategyEditor.SourceText); strategyDirty = false; }
+        StrategyFolder.Validate(configuration);
         if (configDirty) { Citrus.Data.Json.Write(configPath, configuration); configDirty = false; }
         UpdateTitle(); AppendLog("Saved workspace documents.");
     }
@@ -199,8 +196,8 @@ public partial class MainWindow : Window
     /// <summary>Offers save, discard, or cancel before replacing documents or closing.</summary>
     private bool ConfirmEdits()
     {
-        if (!strategyDirty && !configDirty) return true;
-        var choice = MessageBox.Show(this, "Save changes to the strategy and run configuration?", "Unsaved changes", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (!configDirty) return true;
+        var choice = MessageBox.Show(this, "Save changes to the run configuration?", "Unsaved changes", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (choice == MessageBoxResult.Cancel) return false;
         if (choice == MessageBoxResult.Yes) SaveAll();
         return true;
@@ -211,28 +208,20 @@ public partial class MainWindow : Window
     {
         SaveAll();
         var configuration = configEditor.ReadConfiguration();
-        var path = StrategyFolder.Source(configPath!, configuration);
-        if (!string.Equals(path, strategyPath, StringComparison.OrdinalIgnoreCase))
-        {
-            var text = File.ReadAllText(path);
-            loading = true;
-            try
-            {
-                strategyEditor.LoadSource(text, path, configuration.References.Select(p => BacktestWorkspace.Resolve(configPath!, p)).ToArray());
-                strategyPath = path; strategyDirty = false;
-            }
-            finally { loading = false; }
-            UpdateTitle();
-        }
+        strategyPath = StrategyFolder.Input(configPath!, configuration);
+        UpdateTitle();
         return configuration;
     }
 
-    /// <summary>Uses edited reference paths for live code assistance while keeping the currently displayed strategy.</summary>
-    private void RefreshEditorReferences()
+    /// <summary>Opens the configured solution, project, or legacy source using its Windows file association.</summary>
+    private void OpenDevelopmentEnvironment()
     {
-        if (configPath is null) return;
-        // Resolve and validate file names on the language service's background thread, including partially typed paths.
-        strategyEditor.SetReferences(configEditor.ReadReferences().Select(p => StrategyFolder.Resolve(configPath, p)).ToArray());
+        if (configPath is null) throw new InvalidOperationException("Open a strategy workspace first.");
+        var path = StrategyFolder.DevelopmentPath(configPath, configEditor.ReadConfiguration());
+        if (!File.Exists(path)) throw new FileNotFoundException("The configured solution or project was not found.", path);
+        if (Path.GetExtension(path).Equals(".dll", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Set a strategy solution in Configuration to open the source for a prebuilt assembly.");
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
 
     /// <summary>Compiles the saved strategy away from the UI thread and reports compiler diagnostics.</summary>
@@ -246,7 +235,7 @@ public partial class MainWindow : Window
             SetBusy(true, "Validating strategy...");
             var name = await Task.Run(() =>
             {
-                using var compiled = CompiledStrategy.Load(StrategyFolder.Source(path, config), config.References.Select(p => BacktestWorkspace.Resolve(path, p)));
+                using var compiled = CompiledStrategy.LoadConfiguration(path, config);
                 return compiled.Strategy.GetType().Name;
             });
             AppendLog("Valid strategy: " + name); status.Text = "Strategy validation succeeded";
@@ -343,7 +332,7 @@ public partial class MainWindow : Window
     private void SetBusy(bool value, string? message = null)
     {
         busy = value; menu.IsEnabled = !value;
-        strategyEditor.SetReadOnly(value);
+        strategyPage.IsEnabled = !value;
         configPage.IsEnabled = !value;
         progress.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
         CommandManager.InvalidateRequerySuggested();
@@ -353,8 +342,9 @@ public partial class MainWindow : Window
     /// <summary>Marks edited documents and identifies the current run and source in their tabs.</summary>
     private void UpdateTitle()
     {
-        strategyPage.Header = "Strategy" + (strategyDirty ? " *" : "");
+        strategyPage.Header = "Strategy";
         strategyPage.ToolTip = strategyPath;
+        strategyDetails.Text = strategyPath is null ? "Open a strategy workspace to begin." : strategyPath;
         configPage.Header = "Configuration" + (configDirty ? " *" : "");
         Title = $"{(configPath is null ? "Citrus" : (StrategyFolder.Root(configPath) is string folder ? Path.GetFileName(folder) + " / " + Path.GetFileNameWithoutExtension(configPath) : Path.GetFileName(configPath)) + " — Citrus")} — Backtesting Workbench";
     }

@@ -6,7 +6,7 @@ using Citrus.Engine;
 
 namespace Citrus.Desktop;
 
-/// <summary>Checks real WPF views, AvalonEdit behavior, and offline workspace integration.</summary>
+/// <summary>Checks real WPF views, external strategy selection, and offline workspace integration.</summary>
 internal static class DesktopSmokeTest
 {
     internal static bool IsRunning { get; private set; }
@@ -20,7 +20,7 @@ internal static class DesktopSmokeTest
         try
         {
             VerifyEquityChart(directory);
-            await StrategyEditorSmokeTest.RunAsync(directory);
+
             var globalPath = Path.Combine(directory, "global-config.json");
             // Start from a fixture so rerunning the suite does not depend on previous user input.
             Json.Write(globalPath, new GlobalConfiguration());
@@ -115,7 +115,7 @@ internal static class DesktopSmokeTest
 
             window.tabs.SelectedIndex = 0;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            window.strategyEditor.TextView.AppendText("\n// Desktop save verification\n");
+            var originalSource = File.ReadAllText(StrategyFolder.Source(path, config));
             window.tabs.SelectedIndex = 1;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             var editor = window.configEditor;
@@ -133,17 +133,17 @@ internal static class DesktopSmokeTest
             editor.Start.Clear();
             editor.InitialCash.Text = "not a number"; ExpectFailure(() => editor.ReadConfiguration()); editor.InitialCash.Text = "125000";
             var pending = window.RunAsync();
-            Require(window.strategyEditor.TextView.IsReadOnly, "Source remained writable during a backtest.");
+            Require(!window.strategyPage.IsEnabled, "Strategy actions remained enabled during a backtest.");
             await pending.WaitAsync(TimeSpan.FromSeconds(45));
             Require(Json.Read<RunConfiguration>(path).InitialCash == 125000, "Configuration edits were not saved.");
-            Require(File.ReadAllText(StrategyFolder.Source(path, config)).Contains("Desktop save verification"), "Source edits were not saved.");
+            Require(File.ReadAllText(StrategyFolder.Source(path, config)) == originalSource, "The workbench modified externally owned source.");
             Require(before != File.ReadAllText(equityPath), "Updated capital did not affect exported equity.");
-            Require(!window.strategyEditor.TextView.IsReadOnly && window.menu.IsEnabled && window.configPage.IsEnabled, "Controls were not restored after the run.");
+            Require(window.strategyPage.IsEnabled && window.menu.IsEnabled && window.configPage.IsEnabled, "Controls were not restored after the run.");
             foreach (var (index, name) in new[] { (0, "strategy"), (1, "configuration"), (4, "fills") })
             {
                 window.tabs.SelectedIndex = index;
                 await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-                if (index == 0) await window.strategyEditor.AnalyzeAsync();
+
                 await CaptureAsync(window, Path.Combine(directory, "desktop-" + name + ".png"), 1280, 850);
                 if (index == 1) await CaptureAsync(window, Path.Combine(directory, "desktop-configuration-compact.png"), 900, 620);
             }
@@ -153,15 +153,14 @@ internal static class DesktopSmokeTest
             catch (InvalidOperationException) { failed = true; }
             Require(failed && window.fills.Items.Count == 0 && window.metrics.Text == "No completed backtest",
                 "A failed background run left stale results visible.");
-            Require(!window.strategyEditor.TextView.IsReadOnly && window.menu.IsEnabled && window.configPage.IsEnabled,
+            Require(window.strategyPage.IsEnabled && window.menu.IsEnabled && window.configPage.IsEnabled,
                 "A failed run left the workspace locked.");
             window.Close();
             var errorWindow = new ErrorWindow();
             errorWindow.SetError("Offline fixture error", new IOException("A fixture file could not be opened."));
             await CaptureAsync(errorWindow, Path.Combine(directory, "error-dialog.png"), 820, 480); errorWindow.Close();
-            var lineWindow = new GoToLineWindow(100, 42);
-            await CaptureAsync(lineWindow, Path.Combine(directory, "go-to-line.png"), 350, 175); lineWindow.Close();
-            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: WPF rendering, AvalonEdit authoring, settings save/cancel/masking, damaged settings protection, historical library, offline backtests, deterministic replay, output preservation, strict JSON, configuration precision, background execution, result binding, source/configuration saves and restored controls.");
+
+            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: WPF rendering, external strategy workflow, settings save/cancel/masking, damaged settings protection, historical library, offline backtests, deterministic replay, output preservation, strict JSON, configuration precision, background execution, result binding, configuration saves and external source preservation and restored controls.");
             return 0;
         }
         catch (Exception error)

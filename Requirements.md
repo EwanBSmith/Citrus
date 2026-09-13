@@ -36,14 +36,14 @@ A user deploys the same strategy definition through the command-line interface. 
 
 - **UR-PLAT-001** Citrus shall be implemented using .NET.
 - **UR-PLAT-002** Citrus shall support backtesting and live trading.
-- **UR-PLAT-003** Citrus shall support file-based strategy scripts.
-- **UR-PLAT-003A** Strategy scripts shall be written in C#.
-- **UR-PLAT-003B** The initial implementation may compile strategy scripts before execution.
-- **UR-PLAT-003C** The strategy execution contract shall permit interpreted C# execution to be added later without requiring strategy rewrites.
+- **UR-PLAT-003** Citrus shall support external C# strategy projects and prebuilt strategy assemblies; existing file-based scripts remain compatible.
+- **UR-PLAT-003A** Strategies shall be written in C# against Citrus.Trading.
+- **UR-PLAT-003B** Citrus shall build selected strategy projects in Release before execution, or load explicitly selected prebuilt assemblies.
+- **UR-PLAT-003C** The strategy execution contract shall be independent of the authoring IDE and repository; strategy code shall reference Citrus.Trading.
 - **UR-PLAT-004** A strategy definition shall run in backtesting and live trading without modification, except for behaviour explicitly selected through runtime context.
-- **UR-PLAT-005** Citrus shall provide a graphical user interface for strategy creation.
+- **UR-PLAT-005** Citrus shall open externally maintained strategy solutions or projects in the associated IDE. Strategy authoring, debugging and source control belong to the external development environment.
 - **UR-PLAT-006** Citrus shall provide a command-line interface for deployment and execution.
-- **UR-PLAT-007** The Citrus engine and CLI shall run on Windows, macOS, and Linux. The GUI is exempt from this requirement and shall use WPF on Windows, with XAML views and AvalonEdit for source editing.
+- **UR-PLAT-007** The Citrus engine and CLI shall run on Windows, macOS, and Linux. The GUI is exempt from this requirement and shall use WPF on Windows, with XAML views for configuration, execution and analysis.
 
 ### 3.2 Release scope
 
@@ -51,7 +51,7 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-SCOPE-002** Optimisation is not required for the first release but shall remain a planned capability.
 - **UR-SCOPE-003** Live trading is not required for the first release but shall remain a planned capability.
 - **UR-SCOPE-004** The graphical interface is not required for the first release but shall remain a planned capability.
-- **UR-SCOPE-005** The first graphical interface release shall provide C# strategy-script editing.
+- **UR-SCOPE-005** The graphical interface shall select external strategy projects, assemblies and concrete strategy types, and open their solutions in an IDE. It shall not contain a source editor.
 - **UR-SCOPE-006** The first graphical interface release shall allow users to configure and execute backtests.
 - **UR-SCOPE-007** The first graphical interface release shall present backtest results for analysis.
 

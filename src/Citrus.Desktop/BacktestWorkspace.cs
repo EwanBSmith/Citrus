@@ -25,16 +25,15 @@ internal static class BacktestWorkspace
     {
         if (string.IsNullOrWhiteSpace(config.Output))
             throw new ArgumentException("An output path is required.");
-        var strategy = StrategyFolder.Source(configurationPath, config);
         var output = Resolve(configurationPath, config.Output);
         var data = DataCache.Load(historicalDataDirectory ?? GlobalConfiguration.Load().ResolveHistoricalDataDirectory(),
             config.Interval, config.Start, config.End);
         Directory.CreateDirectory(output);
         var dataPath = Path.Combine(output, "historical-data.json");
         Json.Write(dataPath, data);
-        using var compiled = CompiledStrategy.Load(strategy, config.References.Select(p => Resolve(configurationPath, p)));
+        using var compiled = CompiledStrategy.LoadConfiguration(configurationPath, config);
         var result = new BacktestEngine().Run(compiled.Strategy, data, config);
-        Reports.Export(output, result, config, data, strategy, dataPath, compiled.DependencyHashes);
+        Reports.Export(output, result, config, data, compiled.InputPath, dataPath, compiled.DependencyHashes, compiled);
         var metrics = Reports.Metrics(result.Equity.Select(p => (p.Time, p.Equity)), config.RiskFreeRate,
             data.Bars.Any(b => b.Instrument.AssetClass == AssetClass.LinearPerpetual) ? 365 : 252);
         return Task.FromResult(new WorkspaceResult(result, metrics, output));
@@ -45,6 +44,15 @@ internal static class BacktestWorkspace
     {
         var root = Path.Combine(parent, "Citrus-example-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(root);
+        Directory.CreateDirectory(Path.Combine(root, "References"));
+        File.Copy(typeof(IStrategy).Assembly.Location, Path.Combine(root, "References", "Citrus.Trading.dll"));
+        File.WriteAllText(Path.Combine(root, "Example.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net10.0</TargetFramework><EnableDynamicLoading>true</EnableDynamicLoading></PropertyGroup>
+              <ItemGroup><Reference Include="Citrus.Trading"><HintPath>References/Citrus.Trading.dll</HintPath></Reference></ItemGroup>
+            </Project>
+            """);
+        File.WriteAllText(Path.Combine(root, "Example.slnx"), "<Solution><Project Path=\"Example.csproj\" /></Solution>");
 
         File.WriteAllText(Path.Combine(root, "Strategy.cs"), """
             using System.Collections.Generic;
@@ -78,7 +86,8 @@ internal static class BacktestWorkspace
             new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero), 365, 42, 40000, 0.05, 0.5));
         Directory.CreateDirectory(Path.Combine(root, "Backtests"));
         var path = Path.Combine(root, "Backtests", "Default.json");
-        Json.Write(path, new RunConfiguration { Interval = BarInterval.Daily, Output = "Results/Default" });
+        Json.Write(path, new RunConfiguration { Interval = BarInterval.Daily, Output = "Results/Default",
+            StrategyProject = "Example.csproj", StrategyType = "ExampleStrategy", StrategySolution = "Example.slnx" });
         return path;
     }
 }

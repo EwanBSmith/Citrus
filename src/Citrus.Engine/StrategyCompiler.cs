@@ -10,22 +10,37 @@ namespace Citrus.Engine;
 public sealed class CompiledStrategy : IDisposable
 {
     /// <summary>Loads explicit strategy dependencies in a collectible context while sharing the host contract assembly.</summary>
-    private sealed class StrategyLoadContext(IReadOnlyList<string> references) : AssemblyLoadContext(isCollectible: true)
+    private sealed class StrategyLoadContext(IReadOnlyList<string> references, string? assemblyPath = null) : AssemblyLoadContext(isCollectible: true)
     {
+        private readonly AssemblyDependencyResolver? resolver = assemblyPath is null ? null : new(assemblyPath);
         /// <summary>Resolves the shared strategy contract or an explicit dependency, deferring other assemblies to default resolution.</summary>
         protected override Assembly? Load(AssemblyName assemblyName)
         {
             // Share the host contract assembly so strategy instances retain the same IStrategy type identity.
             if (assemblyName.Name == typeof(IStrategy).Assembly.GetName().Name) return typeof(IStrategy).Assembly;
-            var path = references.FirstOrDefault(p => AssemblyName.GetAssemblyName(p).Name == assemblyName.Name);
+            var path = references.FirstOrDefault(p => AssemblyName.GetAssemblyName(p).Name == assemblyName.Name)
+                ?? resolver?.ResolveAssemblyToPath(assemblyName);
+            if (path is null && assemblyPath is not null && Path.Combine(Path.GetDirectoryName(assemblyPath)!, assemblyName.Name + ".dll") is string sibling && File.Exists(sibling))
+                path = sibling;
             return path is null ? null : LoadFromAssemblyPath(path);
         }
+
+        /// <summary>Resolves native assets from the strategy's dependency manifest.</summary>
+        protected override IntPtr LoadUnmanagedDll(string unmanagedDllName) => resolver?.ResolveUnmanagedDllToPath(unmanagedDllName) is string path
+            ? LoadUnmanagedDllFromPath(path) : IntPtr.Zero;
     }
     private readonly AssemblyLoadContext context;
     /// <summary>Gets the instantiated strategy defined by the source file.</summary>
     public IStrategy Strategy { get; }
     /// <summary>Gets SHA-256 hashes keyed by absolute explicit dependency paths for provenance.</summary>
     public IReadOnlyDictionary<string, string> DependencyHashes { get; }
+    private string? snapshotDirectory;
+    /// <summary>Gets the immutable assembly or source input used by this loaded strategy.</summary>
+    public string InputPath { get; private set; } = "";
+    /// <summary>Gets the strategy checkout state captured before loading user code.</summary>
+    public GitRevision? StrategyRevision { get; private set; }
+    /// <summary>Gets the Citrus checkout state captured before loading user code.</summary>
+    public GitRevision? CitrusRevision { get; private set; }
     /// <summary>Retains the load context, strategy instance, and dependency hashes for execution and disposal.</summary>
     private CompiledStrategy(AssemblyLoadContext context, IStrategy strategy, IReadOnlyDictionary<string, string> hashes)
     { this.context = context; Strategy = strategy; DependencyHashes = hashes; }
@@ -46,10 +61,92 @@ public sealed class CompiledStrategy : IDisposable
             var types = assembly.GetTypes().Where(t => typeof(IStrategy).IsAssignableFrom(t) && !t.IsAbstract && t.IsClass).ToArray();
             if (types.Length != 1) throw new InvalidDataException("Strategy file must define exactly one concrete IStrategy with a public parameterless constructor.");
             var strategy = (IStrategy?)Activator.CreateInstance(types[0]) ?? throw new InvalidDataException("Cannot construct strategy.");
-            return new(context, strategy, paths.ToDictionary(p => p, p => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p)))));
+            return new(context, strategy, paths.ToDictionary(p => p, p => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p))))) { InputPath = sourcePath };
         }
         catch { context.Unload(); throw; }
     }
     /// <summary>Requests unloading of the strategy assembly context; collection requires outstanding references to be released.</summary>
     public void Dispose() => context.Unload();
+
+    /// <summary>Builds or loads a configured strategy through the same path for desktop and CLI callers.</summary>
+    public static CompiledStrategy LoadConfiguration(string configurationPath, RunConfiguration configuration)
+    {
+        StrategyFolder.Validate(configuration);
+        var input = StrategyFolder.Input(configurationPath, configuration);
+        var revision = StrategyProject.Revision(input);
+        var citrus = StrategyProject.Revision(typeof(CompiledStrategy).Assembly.Location);
+        var references = configuration.References.Select(p => StrategyFolder.Resolve(configurationPath, p)).ToArray();
+        var compiled = !string.IsNullOrWhiteSpace(configuration.StrategyProject)
+            ? LoadAssembly(StrategyProject.Build(input), configuration.StrategyType, references)
+            : !string.IsNullOrWhiteSpace(configuration.StrategyAssembly)
+                ? LoadAssembly(input, configuration.StrategyType, references) : Load(input, references);
+        compiled.StrategyRevision = revision;
+        compiled.CitrusRevision = citrus;
+        return compiled;
+    }
+
+    /// <summary>Snapshots build output, resolves its dependencies and selects a concrete strategy without locking the build directory.</summary>
+    public static CompiledStrategy LoadAssembly(string assemblyPath, string? typeName = null, IEnumerable<string>? references = null)
+    {
+        assemblyPath = Path.GetFullPath(assemblyPath);
+        if (!File.Exists(assemblyPath)) throw new FileNotFoundException("Build the strategy assembly before loading it.", assemblyPath);
+        var snapshot = Path.Combine(Path.GetTempPath(), "citrus-strategies", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(snapshot);
+        var root = Path.GetDirectoryName(assemblyPath)!;
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(snapshot, Path.GetRelativePath(root, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target);
+        }
+        var paths = new List<string>();
+        foreach (var reference in references ?? [])
+        {
+            var target = Path.Combine(snapshot, Path.GetFileName(reference));
+            if (File.Exists(target) && !File.ReadAllBytes(target).SequenceEqual(File.ReadAllBytes(reference)))
+                throw new InvalidDataException("Conflicting strategy dependency: " + reference);
+            File.Copy(reference, target, true);
+            paths.Add(target);
+        }
+        var contract = Path.Combine(snapshot, "Citrus.Trading.dll");
+        if (File.Exists(contract) && !File.ReadAllBytes(contract).SequenceEqual(File.ReadAllBytes(typeof(IStrategy).Assembly.Location)))
+            throw new InvalidDataException("The strategy was built against a different Citrus.Trading assembly. Rebuild Citrus and the strategy from the same pinned Citrus revision.");
+        var input = Path.Combine(snapshot, Path.GetFileName(assemblyPath));
+        var context = new StrategyLoadContext(paths, input);
+        try
+        {
+            var assembly = context.LoadFromAssemblyPath(input);
+            var types = assembly.GetTypes().Where(t => typeof(IStrategy).IsAssignableFrom(t) && t is { IsAbstract: false, IsClass: true, ContainsGenericParameters: false }
+                && (string.IsNullOrWhiteSpace(typeName) || t.FullName == typeName)).ToArray();
+            if (types.Length != 1 || !types[0].IsPublic || types[0].GetConstructor(Type.EmptyTypes) is null)
+                throw new InvalidDataException("Set strategyType to the full name of one public concrete IStrategy with a public parameterless constructor.");
+            var hashes = Directory.GetFiles(snapshot, "*", SearchOption.AllDirectories).ToDictionary(p => Path.GetRelativePath(snapshot, p),
+                p => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p))));
+            return new(context, (IStrategy)Activator.CreateInstance(types[0])!, hashes) { snapshotDirectory = snapshot, InputPath = input };
+        }
+        catch (ReflectionTypeLoadException error)
+        {
+            context.Unload();
+            throw new InvalidDataException("Could not load strategy dependencies: " + string.Join("; ", error.LoaderExceptions.Select(e => e?.Message)), error);
+        }
+        catch { context.Unload(); throw; }
+    }
+
+    /// <summary>Preserves the exact loaded build output and writes a configuration that selects it without rebuilding.</summary>
+    public string? ExportArtifacts(string directory, RunConfiguration configuration)
+    {
+        if (snapshotDirectory is null) return null;
+        var relative = Path.Combine("strategy-artifacts", Path.GetFileName(snapshotDirectory));
+        var target = Path.Combine(directory, relative);
+        foreach (var file in Directory.GetFiles(snapshotDirectory, "*", SearchOption.AllDirectories))
+        {
+            var destination = Path.Combine(target, Path.GetRelativePath(snapshotDirectory, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, true);
+        }
+        Citrus.Data.Json.Write(Path.Combine(directory, "run.json"), configuration with { Strategy = null, StrategyProject = null,
+            StrategyAssembly = Path.Combine(relative, Path.GetFileName(InputPath)), StrategyType = Strategy.GetType().FullName,
+            StrategySolution = null, References = [], Output = "replay-results" });
+        return relative;
+    }
 }

@@ -11,6 +11,14 @@ public sealed record RunConfiguration
     /// <summary>Gets the legacy source path; folder backtests omit this property and discover Strategy.cs.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Strategy { get; init; }
+    /// <summary>Gets a C# project to build in Release before loading its output; paths are relative to the strategy workspace.</summary>
+    public string? StrategyProject { get; init; }
+    /// <summary>Gets a prebuilt strategy assembly, used instead of building a project.</summary>
+    public string? StrategyAssembly { get; init; }
+    /// <summary>Gets the fully qualified concrete strategy type; required when an assembly contains multiple strategies.</summary>
+    public string? StrategyType { get; init; }
+    /// <summary>Gets an optional solution path to open in the associated IDE.</summary>
+    public string? StrategySolution { get; init; }
     /// <summary>Gets additional assembly paths, resolved relative to the strategy folder or legacy run file.</summary>
     public string[] References { get; init; } = [];
     /// <summary>Gets the optional inclusive UTC lower bound applied to data from the main historical cache.</summary>

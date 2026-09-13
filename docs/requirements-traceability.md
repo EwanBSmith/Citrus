@@ -4,7 +4,7 @@ The source requirements remain unchanged. This table maps first-release requirem
 
 | Requirements | Implementation | Verification |
 | --- | --- | --- |
-| UR-PLAT-001, 003/003A/B/C, 006/007; UR-SCOPE-001 | .NET 10 projects, CLI, Roslyn source loader, independent strategy contract | Build, compiler diagnostics test, CLI examples, cross-platform CI |
+| UR-PLAT-001, 003/003A/B/C, 006/007; UR-SCOPE-001 | .NET 10 projects, CLI, external project/assembly loader and legacy Roslyn source loader, independent strategy contract | Build, compiler diagnostics test, CLI examples, cross-platform CI |
 | UR-PLAT-004; UR-BT-004; UR-STRAT-004; UR-TEST-002 | Shared context with explicit runtime mode | Backtest/fake live-context decision equivalence test; no real live adapter |
 | UR-BRK-003–009 | Equity/perpetual ledgers, execution prices, fees, independent seeded residual rejection | Margin, borrow, funding, liquidation, costs and seeded outcome tests |
 | UR-DATA-001/002 | Alpaca raw bars/actions/calendar; Hyperliquid candles/funding | Offline HTTP pagination, normalization, calendar and missing-history fixtures |
@@ -16,7 +16,7 @@ The source requirements remain unchanged. This table maps first-release requirem
 | UR-EQ-001–005 | Market, limit, opening, closing, and equity shorts | Timing, gap fills, session/DST/holiday, limit, short-availability tests |
 | UR-STRAT-001–003/005 | C# API, rebalance helper, per-run external-data cache, SMA/EMA | Pending-aware rebalance, external-data cache and indicator tests |
 | UR-TEST-001 | Dependency-free automated unit/integration executable | `dotnet run --project tests/Citrus.Tests` |
-| UR-PLAT-005/007; UR-SCOPE-004–007 | Windows WPF/XAML workbench: AvalonEdit and Roslyn C# editing, configuration controls, background backtests, ScottPlot equity chart and result tables | WPF desktop smoke check: semantic editor assistance, undo and search, offline example, replay/export, invalid inputs, configuration precision, displayed result bindings, normal/compact/high-DPI rendering |
+| UR-PLAT-005/007; UR-SCOPE-004–007 | Windows WPF/XAML workbench: external project selection and IDE launch, configuration controls, background backtests, ScottPlot equity chart and result tables | WPF desktop smoke check: external source preservation and project settings, offline example, replay/export, invalid inputs, configuration precision, displayed result bindings, normal/compact/high-DPI rendering |
 | UR-SCOPE-002/003; UR-OPT-001/002 | Planned optimisation and walk-forward | Deferred; no implementation claim |
 | UR-PLAT-002; UR-BRK-001/002; UR-LIVE-001–003 | Live execution remains a later release | Deferred; only market-data connections implemented |
 

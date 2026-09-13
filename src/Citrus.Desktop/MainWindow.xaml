@@ -18,7 +18,8 @@
    <MenuItem Header="_File">
     <MenuItem Header="_Open strategy…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Open" InputGestureText="Ctrl+O"/>
     <MenuItem Header="Create _example…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Example" InputGestureText=""/>
-    <MenuItem Header="_Save all" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Save" InputGestureText="Ctrl+S"/>
+    <MenuItem Header="Open in _IDE" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="IDE"/>
+    <MenuItem Header="_Save configuration" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Save" InputGestureText="Ctrl+S"/>
     <MenuItem Header="E_xit" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Exit" InputGestureText="Alt+F4"/>
    </MenuItem>
    <MenuItem Header="_Backtest">
@@ -66,9 +67,13 @@
     <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="260"/><RowDefinition Height="5"/><RowDefinition Height="100" MinHeight="60"/></Grid.RowDefinitions>
     <TabControl x:Name="tabs">
      <TabItem x:Name="strategyPage" Header="Strategy">
-      <DockPanel>
-                            <local:StrategyEditor x:Name="strategyEditor"/>
-      </DockPanel>
+      <StackPanel Margin="24">
+       <TextBlock Text="Develop strategies in your IDE" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,16"/>
+       <TextBlock Text="Open your strategy solution in Visual Studio or Rider to edit, test and debug. Save your code in the IDE before validating or running a backtest." TextWrapping="Wrap" Margin="0,0,0,16"/>
+       <TextBlock x:Name="strategyDetails" Text="Open a strategy workspace to begin." TextWrapping="Wrap" Margin="0,0,0,16"/>
+       <Button Content="Open in IDE" HorizontalAlignment="Left" Padding="16,8" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="IDE"/>
+       <TextBlock Text="Choose the project and strategy class in Configuration. Validate and Run build the project in Release and report build errors in the execution log." TextWrapping="Wrap" Margin="0,20,0,0"/>
+      </StackPanel>
      </TabItem>
      <TabItem x:Name="configPage" Header="Configuration">
       <DockPanel><TextBlock DockPanel.Dock="Top" Text="Paths are relative to the strategy folder. Rates and margins use fractions: 0.05 = 5%." Margin="8" TextWrapping="Wrap"/>

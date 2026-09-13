@@ -22,6 +22,10 @@ public partial class ConfigurationEditor : UserControl
         InitializeComponent();
         inputs = new()
         {
+            ["StrategyProject"] = StrategyProject,
+            ["StrategyAssembly"] = StrategyAssembly,
+            ["StrategyType"] = StrategyType,
+            ["StrategySolution"] = StrategySolution,
             ["Output"] = Output,
             ["References"] = References,
             ["Start"] = Start,
@@ -127,6 +131,7 @@ public partial class ConfigurationEditor : UserControl
         }
         var result = root.Deserialize<RunConfiguration>()!;
         result.Simulation.Validate();
+        StrategyFolder.Validate(result);
         if (result.InitialCash <= 0) throw new ArgumentException("Initial cash must be positive.");
         if (result.Start is not null && result.End is not null && result.Start >= result.End)
             throw new ArgumentException("Start must precede the exclusive end.");
@@ -155,5 +160,24 @@ public partial class ConfigurationEditor : UserControl
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
         Output.Text = ConfigurationPath is null ? dialog.FolderName : Path.GetRelativePath(
             StrategyFolder.Root(ConfigurationPath) ?? Path.GetDirectoryName(ConfigurationPath)!, dialog.FolderName);
+    }
+
+    /// <summary>Selects an external C# project and clears a previous assembly selection.</summary>
+    private void BrowseProject(object sender, RoutedEventArgs e)
+    {
+        BrowseStrategyFile(StrategyProject, "C# project (*.csproj)|*.csproj");
+        if (!string.IsNullOrWhiteSpace(StrategyProject.Text)) StrategyAssembly.Clear();
+    }
+
+    /// <summary>Selects the solution that the workbench opens in the associated IDE.</summary>
+    private void BrowseSolution(object sender, RoutedEventArgs e) => BrowseStrategyFile(StrategySolution, "Solution (*.slnx;*.sln)|*.slnx;*.sln");
+
+    /// <summary>Stores an external development file relative to the current strategy workspace.</summary>
+    private void BrowseStrategyFile(TextBox field, string filter)
+    {
+        var dialog = new OpenFileDialog { Filter = filter };
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+        field.Text = ConfigurationPath is null ? dialog.FileName : Path.GetRelativePath(
+            StrategyFolder.Root(ConfigurationPath) ?? Path.GetDirectoryName(ConfigurationPath)!, dialog.FileName);
     }
 }

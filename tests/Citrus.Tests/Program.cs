@@ -9,6 +9,7 @@ using Citrus.Simulation;
 
 // Keep regression checks offline and package-free; named actions are executed by the runner below.
 var tests = new List<(string Name, Action Test)>();
+ExternalStrategyTests.Register((name, action) => tests.Add((name, action)));
 var instrument = new Instrument("test", AssetClass.LinearPerpetual, "BTC");
 var start = DateTimeOffset.Parse("2024-01-01T00:00:00Z");
 // Build hourly perpetual bars with the supplied open/close prices and a fixed intrabar price range.

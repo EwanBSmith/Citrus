@@ -1,6 +1,6 @@
 # Citrus
 
-Citrus is a .NET 10 backtesting engine for trusted C# strategy files. It runs on Windows, macOS, and Linux, with simulated equities and linear perpetuals, portfolio order netting, separate substrategy accounting, and JSON/CSV results.
+Citrus is a .NET 10 backtesting engine for trusted external C# strategy projects and assemblies. It runs on Windows, macOS, and Linux, with simulated equities and linear perpetuals, portfolio order netting, separate substrategy accounting, and JSON/CSV results.
 
 ## Build and verify
 
@@ -18,7 +18,7 @@ These commands work on Windows, macOS, and Linux. The automated test executable 
 
 ## Windows desktop workbench
 
-The GUI uses WPF with XAML menus, a workspace tree, resizable panes, tabbed editors, sortable result tables, and a ScottPlot WPF equity chart with UTC dates, mouse pan/zoom, and right-click image export. The engine and CLI remain cross-platform; the desktop application requires Windows 10 version 2004 or later and the .NET 10 Desktop Runtime. Install the .NET 10 SDK to build it.
+The GUI uses WPF with XAML menus, a workspace tree, resizable panes, tabbed configuration and results views, sortable result tables, and a ScottPlot WPF equity chart with UTC dates, mouse pan/zoom, and right-click image export. The engine and CLI remain cross-platform; the desktop application requires Windows 10 version 2004 or later and the .NET 10 Desktop Runtime. Install the .NET 10 SDK to build it.
 
 ```sh
 dotnet restore Citrus.slnx --configfile NuGet.Config
@@ -26,40 +26,33 @@ dotnet build Citrus.slnx -c Release --no-restore
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
 ```
 
-Choose **File → Create example** to create an offline strategy folder and seed example prices into the main cache, or **Open** a strategy folder. Each folder contains `Strategy.cs` and `Backtests/Default.json`. Select a named backtest from **Backtest → Select backtest**; **Backtest → Copy backtest** creates another configuration with its own results directory. Edit C# on the Strategy tab and settings in the Configuration form. **Save all** (`Ctrl+S`) saves both; **Validate** (`F6`) saves and compiles; **Run backtest** (`F5`) saves, executes in the background, and exports reports. Switching configurations prompts to save outstanding edits. The application also accepts a strategy folder or legacy run JSON as its first argument.
+Open a strategy workspace containing `Backtests/*.json`, or pass a named configuration as the first application argument. Choose the project, strategy class and optional IDE solution in **Configuration**. **Open in IDE** opens the associated solution/project. Save code in the IDE before **Validate** (`F6`) or **Run backtest** (`F5`); both build external projects in Release and load the selected strategy. **Save configuration** (`Ctrl+S`) saves run settings. Build errors appear in the execution log. The .NET SDK is required for project builds; prebuilt assemblies need only the runtime.
 
-The Strategy tab uses [AvalonEdit](https://github.com/icsharpcode/AvalonEdit) with Roslyn C# language services, bundled through NuGet. It provides syntax colours, line numbers, folding, indentation guides, matching and closing brackets, automatic indentation, undo/redo, completion for Citrus APIs and configured assemblies, hover information, and method signatures. Click the gutter to fold a block; **Edit** also offers collapse/expand commands. Editing works offline after restore, without a browser runtime or language server.
+The embedded source editor and its language-service dependencies have been removed. The workbench retains named backtests, configuration, historical-data management, result tables and charts. **Create example** provides a small external C# project and solution with a copy of the running Citrus API for offline runs.
 
-Compiler errors and warnings update after a short typing pause, with squiggles and a **Problems** list. Double-click a problem or press Enter on its row to navigate to the source. Live checks analyze unsaved text without saving or executing it. **Validate** additionally loads and constructs the strategy, checking the executable strategy contract. Edited assembly references resolve relative to the run file. Missing or invalid references appear as a code assistance error in the editor status strip.
+Run the Windows integration check with `dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke`. It verifies settings, configuration preservation, external source ownership, background execution, result bindings and WPF rendering.
 
-| Editor command | Shortcut |
-| --- | --- |
-| Complete code; accept selected completion | `Ctrl+Space`; `Tab` or `Enter` |
-| Method parameter information | `Ctrl+Shift+Space` |
-| Find / replace | `Ctrl+F` / `Ctrl+H` |
-| Next / previous match (wraps) | `F3` / `Shift+F3` |
-| Go to line / definition in this file | `Ctrl+G` / `F12` |
-| Format document | `Ctrl+Shift+F` |
-| Toggle selected line comments | `Ctrl+/` |
-| Indent / unindent selected lines | `Tab` / `Shift+Tab` |
-| Undo / redo | `Ctrl+Z` / `Ctrl+Y` |
-| Dismiss completion or information | `Esc` |
+## External strategy development
 
-Find/replace supports match case, whole words, and regular expressions. Regex replacements support capture groups such as `$1`; literal mode inserts replacement text exactly. Replace all, formatting, and comment commands each form one undo step. Formatting uses four spaces and preserves LF or CRLF line endings. Source editing is locked during validation and execution; opening another source resets the undo history.
+The private [Citrus.Strategies repository](https://github.com/EwanBSmith/Citrus.Strategies) owns the strategy solution, current Zorro portfolio, tests and debug runner. Citrus is pinned under `external/Citrus` as a Git submodule. Clone with `--recurse-submodules` and open `Citrus.Strategies.slnx` in Visual Studio or Rider. Strategy libraries reference `Citrus.Trading`; runners and integration tests can reference `Citrus.Engine`.
 
-Configuration paths resolve relative to the strategy folder for named backtests, or to the run JSON for legacy standalone configurations. Numeric fields use a decimal point and preserve untouched precision. Optional date bounds accept ISO 8601 timestamps, such as `2024-01-01T00:00:00Z`; leave a field blank to remove its boundary. Strategies select the instruments they trade. A run selects an interval plus optional UTC bounds; Citrus assembles every matching instrument from the main historical cache without provider access.
+A workspace configuration can select a normal single-target .NET 10 class-library project:
 
-Overview reports portfolio performance and equity. Result tabs expose orders, fills, positions, costs, equity (including substrategy balances), and instrument attribution; click a column to sort or use `Ctrl+C` to copy selected rows. Tables show the first 5,000 records; **Results folder** opens the complete JSON/CSV exports. Runs replace matching report files. Prior results are cleared when a new run starts so a failed run cannot appear successful.
-
-Saved-result import and run cancellation are not yet provided. The window stays responsive during execution but must wait for the current operation before closing. Strategies remain trusted local code with normal process permissions.
-
-Windows-only offline integration and rendering checks:
-
-```sh
-dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke
+```json
+{
+  "schemaVersion": 1,
+  "strategyProject": "src/Strategies/Strategies.csproj",
+  "strategyType": "MyStrategies.Hold",
+  "strategySolution": "MyStrategies.slnx",
+  "output": "Results/Hold"
+}
 ```
 
-The smoke check writes its outcome and WPF layout PNGs to the specified folder, and returns a nonzero exit code on failure. It includes real Roslyn completion/diagnostic checks, AvalonEdit text input, replacement, undo, formatting, reference changes, settings masking/save/cancel, configuration precision, displayed result cells, and save/run integration. Normal, compact, and high-DPI rendering checks run on the WPF dispatcher. `Citrus.slnx` contains the complete product and is built as a solution on Windows. On macOS and Linux, build the CLI and test projects directly as shown above so the Windows desktop project is excluded.
+Paths are relative to the workspace containing `Backtests`, or to a standalone configuration's directory. Use `strategyAssembly` instead of `strategyProject` for a prebuilt DLL. Set `strategyType` to the fully qualified name when more than one concrete strategy is present. Each selected type must be public, implement `IStrategy`, and have a public parameterless constructor. Existing `Strategy.cs` folders remain supported.
+
+Project runs invoke `dotnet build -c Release` and use MSBuild's actual `TargetPath`. Enable `EnableDynamicLoading` in the class library, copy required content into its build output, and resolve content relative to the strategy assembly. Managed/native dependencies resolve from the captured output and its `.deps.json`. Use the CLI/desktop built from the same pinned Citrus revision; a different `Citrus.Trading.dll` is rejected with rebuild guidance.
+
+External runs copy the loaded DLLs, PDBs and content into a unique `strategy-artifacts` directory beneath the results. The manifest records hashes and checkout revisions/dirty state (null where unavailable). `run.json` selects the captured assembly. Run `Citrus.Cli replay <results-folder>` to use that assembly and the captured `historical-data.json`, independently of the live market cache. The current engine and runtime still execute the replay; preserve the Citrus revision and runtime too. External I/O and strategy-owned randomness are not made deterministic by this mechanism. Temporary snapshots remain under the OS temp directory while assemblies may still be loaded.
 
 To edit the interface visually, open `src/Citrus.Desktop/MainWindow.xaml` in Visual Studio's XAML Designer after restoring and building the solution. Each window and reusable panel has its own `.xaml` layout and matching `.xaml.cs` behavior file. See [desktop development and designer guidance](docs/desktop-development.md).
 
