@@ -6,14 +6,13 @@ namespace Citrus.Strategies;
 public sealed class DemoHold : IStrategy
 {
     private InstrumentContext market = null!;
-    private bool submitted;
+    private bool submitted = false;
 
     /// <summary>Allocates capital and binds the demo instrument by symbol.</summary>
     public void OnStart(IStrategyContext context)
     {
         context.Register("hold", 1m);
         market = new InstrumentContext(context, "hold", "BTC");
-        submitted = false;
     }
 
     /// <summary>Places one order whose fill must occur on a subsequent bar.</summary>
