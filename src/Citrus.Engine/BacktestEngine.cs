@@ -29,22 +29,7 @@ public sealed class BacktestEngine
         var available = data.Bars.Select(b => b.Instrument).ToHashSet();
         var ledger = new Ledger(configuration.InitialCash);
         var book = new OrderBook(ledger, configuration.Simulation, configuration.Seed);
-        var executionCandles = new Dictionary<Bar, (Bar Next, Bar Following)>();
-        if (configuration.Simulation.ZorroDailySlippageSeconds > 0)
-        {
-            if (data.Interval.Minutes != 1440) throw new ArgumentException("Zorro daily slippage requires daily bars.");
-            foreach (var group in data.Bars.GroupBy(b => b.Instrument))
-            {
-                var ordered = group.OrderBy(b => b.CloseTime).ToArray();
-                // Zorro's two-record prefetch leaves the last valid extrapolation cached for the final two callbacks.
-                for (var i = 0; i < ordered.Length && ordered.Length >= 3; i++)
-                {
-                    var next = Math.Min(i + 1, ordered.Length - 2);
-                    executionCandles.Add(ordered[i], (ordered[next], ordered[next + 1]));
-                }
-            }
-        }
-        var context = new Context(ledger, book, mode, available, data.Sessions, configuration.Simulation.ExecuteMarketOrdersAtCompletedClose, executionCandles);
+        var context = new Context(ledger, book, mode, available, data.Sessions);
         var opens = data.Bars.GroupBy(b => b.OpenTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var closes = data.Bars.GroupBy(b => b.CloseTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var funding = data.Funding.GroupBy(f => f.Time).ToDictionary(g => g.Key, g => g.OrderBy(f => f.Instrument.Key, StringComparer.Ordinal).ToArray());
@@ -118,7 +103,7 @@ public sealed class BacktestEngine
     }
 
     /// <summary>Implements strategy operations against the ledger and order book while retaining completed history.</summary>
-    private sealed class Context(Ledger ledger, OrderBook book, ExecutionMode mode, HashSet<Instrument> available, IReadOnlyList<MarketSession> sessions, bool completedCloseExecution, IReadOnlyDictionary<Bar, (Bar Next, Bar Following)> executionCandles) : IStrategyContext
+    private sealed class Context(Ledger ledger, OrderBook book, ExecutionMode mode, HashSet<Instrument> available, IReadOnlyList<MarketSession> sessions) : IStrategyContext
     {
         private readonly Dictionary<Instrument, List<Bar>> history = [];
         private readonly Dictionary<string, Instrument> symbols = available.ToDictionary(i => i.Symbol, StringComparer.OrdinalIgnoreCase);
@@ -172,11 +157,6 @@ public sealed class BacktestEngine
             if (Stopping) throw new InvalidOperationException("Run is stopping.");
             order = order with { Instrument = Resolve(order.Instrument) };
             var id = book.Submit(order, Time);
-            if (completedCloseExecution && order.Type == OrderType.Market && history.TryGetValue(order.Instrument, out var bars) && bars[^1].CloseTime == Time)
-            {
-                var candles = executionCandles.GetValueOrDefault(bars[^1]);
-                book.ExecuteCompletedClose(id, bars[^1], candles.Next, candles.Following);
-            }
             return id;
         }
         /// <summary>Cancels a pending order at the current simulation time and reports whether it was found.</summary>

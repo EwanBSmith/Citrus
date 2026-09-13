@@ -1,41 +1,38 @@
-# Zorro portfolio
+# Zorro portfolio using Citrus execution
 
-This is the matching Citrus version of `cq_Alpaca_Portfolio.c`, tested against the supplied Zorro 3.112 trade export. Use this example for parity, rather than `SeasonalityRiskPremia`, which implements different, cleaned-up trading semantics on Alpaca data.
+This strategy adapts the nine enabled sleeves from `cq_Alpaca_Portfolio.c` to the normal Citrus fill model. `SeasonalityRiskPremia` remains a separate example with different trading rules. No Zorro execution toggle, immediate completed-close fill, tick-rounding override, or future-candle extrapolation remains in the engine.
 
-## Retained strategy and results
+## Execution
 
-The standalone T6 backtest project and launch script have been removed. Run this strategy through the normal GUI or CLI using the main historical library. Instruments bind by symbol (for example `SCHB`), so a venue label such as `US` does not prevent trading. Missing symbols fail explicitly. The strategy, configuration, index snapshots and engine compatibility options remain.
+Calendar-known trades (payday, gold, bond, oil, and the reversion sleeve's month-end exit) are submitted one minute before the scheduled session close as day-only market-on-close orders. Sizing uses the preceding completed daily close. The session calendar supplies auction times, including early closes; it does not supply prices.
 
-The reference below used adjusted Zorro T6 prices, original date coverage and 15:30 New York timestamps. Running against the currently cached Alpaca data is supported, but different prices, date coverage or timestamps will produce different results; symbol-based lookup does not make distinct datasets numerically identical.
+Price-dependent signals (equity/bond reversion entry, VIX hedge and basis, risk premia, and equity/bond pair) use completed daily bars and submit market orders for the next available open. A decision that needs today's close cannot obtain that same close under this model.
 
-The strategy uses the VIX and VIX3M snapshots beside its source. Updating ETF or index history can change results; keep the inputs aligned when reproducing a particular historical run.
+The strategy includes pending quantities when computing its intended position. Reversals replace outstanding intent with one net order from the actual holding to the desired holding, so a later exit cannot cancel an earlier unfilled reversal. All orders go through normal netting, costs, rejection, margin checks and notifications. Rejected orders do not create assumed holdings; subsequent signals use actual positions. There is no special end-of-run liquidation: pending orders are cancelled by the engine and remaining holdings are marked to the final observed prices.
 
-The comparison framework and diagnostic helpers have also been removed; the engine regression tests remain. The figures below describe the previously verified run, not a new comparison performed automatically.
+The source's calendar-day counting, signal thresholds, fixed allocations, whole-unit sizing, risk-premia slot/asset ordering, midpoint pair signal and original CBOE snapshots remain. They were not tuned to recover the old profit. Natural gas remains disabled. Index snapshots have the source's stale tail; refreshing them changes the experiment.
 
-## Verified reference
+## Same-data comparison
 
-For the supplied March 2010â€“September 11, 2026 export:
+Verified locally on 13 September 2026 with adjusted Alpaca SIP OHLC, 1,471 daily observations from 2 November 2020 through 11 September 2026, and $17,000 starting capital. Both runs used identical ETF and index data and zero configured spread, commission, borrow and ordinary slippage. The old compatibility run additionally used its five-second Zorro extrapolation and cent rounding; the adapted run uses ordinary unrounded OHLC execution.
 
-- 3,571 closed Zorro trade rows recombine into 6,604 execution groups.
-- All execution groups match by UTC minute, sleeve, asset, entry/exit, direction, quantity and fill price.
-- Zorro exported profit: $21,381.34068028; Citrus: $21,381.34. The sub-cent difference reflects Zorro's floating-point trade accounting and printed precision.
-- Starting cash: $17,000; final Citrus equity: $38,381.34; all positions closed.
+| Metric | Old compatibility mode | Native Citrus strategy |
+| --- | ---: | ---: |
+| Final marked equity | $23,334.31 | $22,995.39 |
+| Net P&L | $6,334.31 | $5,995.39 |
+| Total return | 37.26% | 35.27% |
+| Maximum observed drawdown | 5.10% | 4.85% |
+| Annualized daily Sharpe | 1.380 | 1.302 |
+| Attributed fills | 2,671 | 2,637 |
 
-This verifies executions and profit, not byte-identical trade tickets, chart samples, Sharpe, annual return, drawdown or Monte Carlo statistics. Those reports use platform-specific definitions; Zorro's capital-required return is not Citrus's return on starting cash. Slippage is already embedded in fill prices, not charged again as a cash fee. Citrus's slippage-cost diagnostic measures signed pre-rounding price impact; it is not Zorro's reported trade-slippage statistic.
+Daily-return correlation is 0.9836. Final equity is $338.92 lower (1.45% of the old final equity; net profit is 5.35% lower). The native result includes unrealized P&L on open final holdings; the old run forced them closed. This demonstrates similar behaviour on this history, not exact fills or a prediction of future performance. Standard spread/slippage/commission settings remain available for cost assumptions.
 
-## Preserved source behavior
+The former $38,381.34 parity figure used a different March 2010–September 2026 Zorro T6 dataset and compatibility execution. It is not the benchmark for this shorter Alpaca run.
 
-All nine enabled strategies use one uniform `Sleeve` structure: PaydaySeason, GoldSeason, BondSeason, EqBondReversion, VIXHedge, VIXBasis, RiskPremia, OilSeason and EqBondPair. Natural gas stays disabled because it is disabled in this Zorro reference.
+## Running
 
-Parity deliberately preserves source quirks rather than silently repairing them:
+Run `backtest examples/ZorroPortfolio Comparison` for the fixed comparison dates, or `backtest examples/ZorroPortfolio` for the available history. Both use native Citrus fills. The comparison's `Results/Comparison` directory is overwritten on reruns.
 
-- Adjusted T6 OHLC, 15:30 New York daily decisions, original inception/warmup behavior, and no second application of dividends or splits.
-- Zorro's unconfigured global trading-day calendar (weekdays except literal January 1 and December 25), separately from the actual US holiday helper used by oil seasonality. The helper omits exceptional exchange closures.
-- `price()` is the daily high/low midpoint for the pair signal; its EMA is recursively initialized from the first observation.
-- Sample variance for risk premia. The original double increment skips its middle volatility slot, and the asset-list order assigns the gold-derived weight to TLT. This run's unused slot is explicitly zero here; the original uninitialized variable is not portable across arbitrary Zorro builds.
-- Zorro's constant-folded hedge allocations, 5% drift checks, whole-share truncation, and terminal cancellation of new entries followed by liquidation.
-- Original CBOE index snapshots, including their stale tail, instead of silently substituting fresher data.
+Use adjusted daily histories for SCHB, GLDM, TLT, UGA, UVXY, VXZ, SVXY and VIXY in the main historical cache. The missing ETFs were downloaded and installed there for this comparison; BOIL is also available for the separate seasonality example. The strategy loads VIX and VIX3M from its adjacent `Data` directory. Keep index and ETF coverage aligned when extending the analysis.
 
-The opt-in `executeMarketOrdersAtCompletedClose`, `completedCloseTickSize`, and `zorroDailySlippageSeconds` options reproduce the local daily Fill=1 behavior. Entries round before extrapolation; exits round afterward. The execution model uses future source candles privately for Zorro's five-second price extrapolation, including flat-candle and terminal-cache behavior. It never exposes those candles through strategy history. These details were checked with isolated Zorro diagnostics; the public documentation describes [Fill=1](https://zorro-project.com/manual/en/fill.htm) and [slippage](https://zorro-project.com/manual/en/spread.htm), but not every implementation edge case.
-
-This legacy compatibility mode is not a realistic guarantee of obtaining a known daily close. Normal Citrus next-event execution remains the default. The slippage compatibility model is specific to this daily T6/zero-spread setup; it is not a general emulation of every Zorro fill mode. The strategy closes opposing positions before opening them; do not combine reversals into one order when using it.
+The regression suite compiles this strategy and checks auction timing, preceding-close sizing, next-open signals, reversals, repeatability and unchanged pre-close decisions after an unseen close is altered.

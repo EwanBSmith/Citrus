@@ -5,7 +5,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using Citrus.Trading;
 
-/// <summary>Reproduces the local Zorro portfolio's legacy daily-bar decisions against imported adjusted T6 history.</summary>
+/// <summary>Adapts the source portfolio to Citrus closing-auction calendar orders and next-open price signals.</summary>
 public sealed class ZorroPortfolio : IStrategy
 {
     private sealed class Sleeve
@@ -22,11 +22,10 @@ public sealed class ZorroPortfolio : IStrategy
         public InstrumentContext this[string symbol] => Markets[symbol];
     }
     private Sleeve payday = null!, gold = null!, bond = null!, reversion = null!, hedge = null!, basis = null!, risk = null!, oil = null!, pair = null!;
-    private Sleeve[] sleeves = [];
     private (double Date, double Close)[] vix = [], vix3m = [];
     private readonly List<double> volatility = [], ratios = [];
     private double? ema, previousRatio, previousEma;
-    private DateOnly lastDate;
+    private DateOnly? processedDate;
 
     /// <summary>Uses the source account and asset ordering, with natural gas disabled.</summary>
     public void OnStart(IStrategyContext context)
@@ -40,24 +39,21 @@ public sealed class ZorroPortfolio : IStrategy
         risk = new(context, "RiskPremia", 3000, "SCHB", "GLDM", "TLT");
         oil = new(context, "OilSeason", 1160, "UGA");
         pair = new(context, "EqBondPair", 800, "SCHB", "TLT");
-        sleeves = [payday, gold, bond, reversion, hedge, basis, risk, oil, pair];
         vix = LoadIndex(context, "VIX"); vix3m = LoadIndex(context, "VIX3M");
         volatility.Clear(); ratios.Clear(); ema = previousRatio = previousEma = null;
-        lastDate = DateOnly.FromDateTime(context.Sessions.Last().Close.UtcDateTime);
+        processedDate = null;
+        foreach (var session in context.Sessions.Where(s => s.Close > context.Time))
+            context.Schedule(session.Close.AddMinutes(-1), "calendar");
     }
 
-    /// <summary>Runs the source rules in original order, after 90 main-asset warmup bars.</summary>
+    /// <summary>Evaluates completed daily-bar signals; market orders become eligible at the next open.</summary>
     public void OnBar(IStrategyContext context, IReadOnlyList<Bar> bars)
     {
         var date = DateOnly.FromDateTime(context.Time.UtcDateTime);
-        if (date == lastDate)
-        {
-            // Zorro cancels newly pending entries at termination, then liquidates established trades.
-            foreach (var market in sleeves.SelectMany(s => s.Markets.Values)) { market.ExitLong(); market.ExitShort(); }
-            return;
-        }
+        if (!bars.Any(b => b.Instrument == payday["SCHB"].Instrument && b.SessionClose) || processedDate == date) return;
+        if (bars.Any(b => b.SessionClose && !b.SessionOpen)) throw new InvalidOperationException("ZorroPortfolio requires daily session bars.");
+        processedDate = date;
         var tdm = Enumerable.Range(1, date.Day).Count(d => CalendarDay(new(date.Year, date.Month, d)));
-        var tom = Enumerable.Range(1, DateTime.DaysInMonth(date.Year, date.Month)).Count(d => CalendarDay(new(date.Year, date.Month, d)));
         var spot = IndexClose(vix, context.Time); var term = IndexClose(vix3m, context.Time);
         volatility.Add(spot);
         var eq = MeanPrice(context, pair["SCHB"]); var treas = MeanPrice(context, pair["TLT"]);
@@ -70,12 +66,6 @@ public sealed class ZorroPortfolio : IStrategy
         var warm = context.History(payday["SCHB"].Instrument, 90).Count == 90;
         if (warm)
         {
-            if (tdm is 8 or 16) Enter(payday, "SCHB", 1);
-            if (tdm == 12 || tdm == tom) payday["SCHB"].ExitLong();
-            if (date.DayOfWeek == DayOfWeek.Thursday) Enter(gold, "GLDM", 1); else gold["GLDM"].ExitLong();
-            if (tdm == tom - 7) Enter(bond, "TLT", 1);
-            if (tdm == tom) { bond["TLT"].ExitLong(); Enter(bond, "TLT", -1); }
-            if (tdm == 7) bond["TLT"].ExitShort();
             if (tdm == 14)
             {
                 var eh = context.History(reversion["SCHB"].Instrument, tdm + 1);
@@ -86,7 +76,6 @@ public sealed class ZorroPortfolio : IStrategy
                     if (diff > 0) Enter(reversion, "TLT", 1); else if (diff < 0) Enter(reversion, "SCHB", 1);
                 }
             }
-            if (tdm == tom) { reversion["SCHB"].ExitLong(); reversion["TLT"].ExitLong(); }
             Target(hedge["UVXY"], -551.052978515625m);
             // lite-C constant-folds 2094*(2.8/(1.+2.8)) to this float; retaining it matters at the 5% boundary.
             Target(hedge["VXZ"], 1542.949951171875m);
@@ -96,20 +85,16 @@ public sealed class ZorroPortfolio : IStrategy
                 var vol = Math.Sqrt(sample.Sum(x => (x - mean) * (x - mean)) / 60 * 252);
                 var low = term < 15 ? .85 : term < 17 ? .9 : term < 20 ? .95 : term < 25 ? 1 : 1.1;
                 var high = vol < 20 ? low : 1.1;
-                if (spot / term < low) { basis["VIXY"].ExitLong(); Target(basis["SVXY"], 800); }
-                else if (spot / term > high) { basis["SVXY"].ExitLong(); Target(basis["VIXY"], 800); }
-                else { basis["VIXY"].ExitLong(); basis["SVXY"].ExitLong(); }
+                if (spot / term < low) { Exit(basis["VIXY"], 1); Target(basis["SVXY"], 800); }
+                else if (spot / term > high) { Exit(basis["SVXY"], 1); Target(basis["VIXY"], 800); }
+                else { Exit(basis["VIXY"], 1); Exit(basis["SVXY"], 1); }
             }
             RiskPremia(context);
-            if (Holiday(WeekdayOffset(date, 5))) Enter(oil, "UGA", 1);
-            if (Holiday(WeekdayOffset(date, 2))) oil["UGA"].ExitLong();
-            if (Holiday(WeekdayOffset(date, 1))) Enter(oil, "UGA", -1);
-            if (Holiday(WeekdayOffset(date, -1))) oil["UGA"].ExitShort();
             if (ema is not null && previousEma is not null && ratios.Count > 0)
             {
                 var ratio = ratios[^1];
-                if (previousRatio >= previousEma && ratio < ema) { Enter(pair, "SCHB", 1); pair["TLT"].ExitLong(); }
-                else if (previousRatio <= previousEma && ratio > ema) { Enter(pair, "TLT", 1); pair["SCHB"].ExitLong(); }
+                if (previousRatio >= previousEma && ratio < ema) { Enter(pair, "SCHB", 1); Exit(pair["TLT"], 1); }
+                else if (previousRatio <= previousEma && ratio > ema) { Enter(pair, "TLT", 1); Exit(pair["SCHB"], 1); }
             }
         }
         previousRatio = ratios.Count == 0 ? null : ratios[^1]; previousEma = ema;
@@ -136,27 +121,66 @@ public sealed class ZorroPortfolio : IStrategy
         for (var i = 0; i < 3; i++) if (weights[i] > 0) Target(risk[symbols[i]], (decimal)(weights[i] * factor) * risk.Allocation);
     }
 
-    /// <summary>Uses source quantity rounding and closes opposing holdings under the default Hedge=1 behavior.</summary>
-    private static void Enter(Sleeve sleeve, string symbol, int side)
+    /// <summary>Submits calendar-known trades one minute before the auction using only previously completed prices.</summary>
+    public void OnScheduled(IStrategyContext context, string name)
     {
-        var market = sleeve[symbol];
-        if (market.Context.History(market.Instrument, 91).Count < 91) return;
-        if (side > 0) market.ExitShort(); else market.ExitLong();
-        if (market.Close is not > 0) return;
-        var quantity = Math.Floor(sleeve.Allocation / market.Close.Value);
-        if (quantity <= 0) return;
-        if (side > 0) market.Buy(quantity); else market.Sell(quantity);
+        if (name != "calendar" || context.History(payday["SCHB"].Instrument, 90).Count < 90) return;
+        var date = DateOnly.FromDateTime(context.Time.UtcDateTime);
+        var tdm = Enumerable.Range(1, date.Day).Count(d => CalendarDay(new(date.Year, date.Month, d)));
+        var tom = Enumerable.Range(1, DateTime.DaysInMonth(date.Year, date.Month)).Count(d => CalendarDay(new(date.Year, date.Month, d)));
+        const OrderType close = OrderType.MarketOnClose;
+        if (tdm is 8 or 16) Enter(payday, "SCHB", 1, close);
+        if (tdm == 12 || tdm == tom) Exit(payday["SCHB"], 1, close);
+        if (date.DayOfWeek == DayOfWeek.Thursday) Enter(gold, "GLDM", 1, close); else Exit(gold["GLDM"], 1, close);
+        if (tdm == tom - 7) Enter(bond, "TLT", 1, close);
+        if (tdm == tom) Enter(bond, "TLT", -1, close);
+        if (tdm == 7) Exit(bond["TLT"], -1, close);
+        if (tdm == tom) { Exit(reversion["SCHB"], 1, close); Exit(reversion["TLT"], 1, close); }
+        if (Holiday(WeekdayOffset(date, 5))) Enter(oil, "UGA", 1, close);
+        if (Holiday(WeekdayOffset(date, 2))) Exit(oil["UGA"], 1, close);
+        if (Holiday(WeekdayOffset(date, 1))) Enter(oil, "UGA", -1, close);
+        if (Holiday(WeekdayOffset(date, -1))) Exit(oil["UGA"], -1, close);
     }
 
-    /// <summary>Applies the source's five-percent drift and floors the notional difference to whole shares.</summary>
+    /// <summary>Adds source-sized lots on the same side or reverses to the requested side with one net order.</summary>
+    private static void Enter(Sleeve sleeve, string symbol, int side, OrderType type = OrderType.Market)
+    {
+        var market = sleeve[symbol];
+        if (market.Context.History(market.Instrument, 91).Count < 91 || market.Close is not > 0) return;
+        var quantity = Math.Floor(sleeve.Allocation / market.Close.Value);
+        if (quantity <= 0) return;
+        var projected = Projected(market);
+        SetQuantity(market, (Math.Sign(projected) == side ? projected : 0) + side * quantity, type);
+    }
+
+    /// <summary>Includes accepted unfilled orders when evaluating this account's intended holding.</summary>
+    private static decimal Projected(InstrumentContext market) => market.Quantity + market.Context.OpenOrders
+        .Where(o => o.Request.Substrategy == market.Substrategy && o.Request.Instrument == market.Instrument).Sum(o => o.Request.Quantity);
+
+    /// <summary>Replaces this market's outstanding intent with a single delta from its actual filled position.</summary>
+    private static void SetQuantity(InstrumentContext market, decimal desired, OrderType type)
+    {
+        market.CancelOrders();
+        var delta = desired - market.Quantity;
+        var duration = type == OrderType.MarketOnClose ? TimeInForce.Day : TimeInForce.GoodTillCancelled;
+        if (delta > 0) market.Buy(delta, type, duration); else if (delta < 0) market.Sell(-delta, type, duration);
+    }
+
+    /// <summary>Closes only the specified projected side without cancelling an exit already moving it to flat.</summary>
+    private static void Exit(InstrumentContext market, int side, OrderType type = OrderType.Market)
+    {
+        if (Math.Sign(Projected(market)) == side) SetQuantity(market, 0, type);
+    }
+
+    /// <summary>Applies five-percent notional drift using completed prices and pending quantities.</summary>
     private static void Target(InstrumentContext market, decimal target)
     {
-        if (market.Context.History(market.Instrument, 91).Count < 91) return;
-        if (market.Close is not > 0) return;
-        var diff = target - market.Quantity * market.Close.Value;
+        if (market.Context.History(market.Instrument, 91).Count < 91 || market.Close is not > 0) return;
+        var projected = Projected(market);
+        var diff = target - projected * market.Close.Value;
         var qty = Math.Floor(Math.Abs(diff) / market.Close.Value);
         if (qty <= 0 || Math.Abs(diff) / Math.Abs(target) <= .05m) return;
-        if (diff > 0) market.Buy(qty); else market.Sell(qty);
+        SetQuantity(market, projected + Math.Sign(diff) * qty, OrderType.Market);
     }
 
     /// <summary>Uses Zorro's unconfigured global Holidays array, separately from the oil helper.</summary>

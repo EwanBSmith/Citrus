@@ -29,80 +29,6 @@ BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOpt
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
-Test("Completed-close execution is opt-in and publishes synchronous positions without future history", () =>
-{
-    foreach (var legacy in new[] { false, true })
-    {
-        var result = Run(new CallbackStrategy(onBar: (c, _) =>
-        {
-            if (c.History(instrument, 10).Count != 1) return;
-            c.Submit(new("a", instrument, 1));
-            Equal(legacy ? 1m : 0m, c.Portfolio.Positions.Sum(p => p.Quantity));
-            Equal(1, c.History(instrument, 10).Count);
-        }), options: new() { ExecuteMarketOrdersAtCompletedClose = legacy });
-        Equal(legacy ? 100m : 110m, result.Fills.Single().Price);
-    }
-});
-Test("Legacy close prices round entries before slippage and exits after slippage", () =>
-{
-    var ledger = new Ledger(1000); ledger.Register("a", 1);
-    var options = new SimulationOptions { ExecuteMarketOrdersAtCompletedClose = true, CompletedCloseTickSize = .01m, ZorroDailySlippageSeconds = 5 };
-    var book = new OrderBook(ledger, options, 1);
-    var bar = new Bar(instrument, start, start.AddDays(1), 55m, 56m, 54m, 54.8737983703613m, 1000);
-    var next = new Bar(instrument, start.AddDays(1), start.AddDays(2), 54.7748794555664m, 55.0530471801758m, 54.6512489318848m, 55.0036010742188m, 1000);
-    ledger.Mark(instrument, bar.Close);
-    var entry = book.Submit(new("a", instrument, 1), bar.CloseTime);
-    book.ExecuteCompletedClose(entry, bar, next);
-    var exit = book.Submit(new("a", instrument, -1), bar.CloseTime);
-    book.ExecuteCompletedClose(exit, bar, next);
-    Equal(54.87m, book.Fills[0].Price); Equal(54.88m, book.Fills[1].Price);
-    Equal(0m, ledger.Quantity("a", instrument));
-});
-Test("Legacy daily slippage handles bullish bearish and flat candles with linear delay", () =>
-{
-    foreach (var (close, delay, expected) in new[] { (101m, 5d, 100.17m), (99m, 5d, 100m), (100m, 5d, 100.03m), (101m, 10d, 100.34m) })
-    {
-        var ledger = new Ledger(1000); ledger.Register("a", 1); ledger.Mark(instrument, 100);
-        var book = new OrderBook(ledger, new() { ExecuteMarketOrdersAtCompletedClose = true, CompletedCloseTickSize = .01m, ZorroDailySlippageSeconds = delay }, 1);
-        var bar = new Bar(instrument, start, start.AddDays(1), 100, 110, 90, 100, 1000);
-        var next = new Bar(instrument, start.AddDays(1), start.AddDays(2), 100, 110, 90, close, 1000);
-        var following = new Bar(instrument, start.AddDays(2), start.AddDays(3), 102, 110, 90, 103, 1000);
-        book.ExecuteCompletedClose(book.Submit(new("a", instrument, 1), bar.CloseTime), bar, next, following);
-        Equal(expected, book.Fills.Single().Price);
-    }
-});
-Test("Legacy execution rejects invalid options and mismatched order bars", () =>
-{
-    Throws<ArgumentException>(() => new SimulationOptions { CompletedCloseTickSize = -.01m }.Validate());
-    Throws<ArgumentException>(() => new SimulationOptions { ZorroDailySlippageSeconds = 5 }.Validate());
-    Throws<ArgumentException>(() => new SimulationOptions { ExecuteMarketOrdersAtCompletedClose = true, ZorroDailySlippageSeconds = double.NaN }.Validate());
-    var ledger = new Ledger(1000); ledger.Register("a", 1);
-    var bar = Data(100).Bars[0];
-    var disabled = new OrderBook(ledger, new(), 1);
-    Throws<InvalidOperationException>(() => disabled.ExecuteCompletedClose(1, bar));
-    var book = new OrderBook(ledger, new() { ExecuteMarketOrdersAtCompletedClose = true }, 1);
-    var limit = book.Submit(new("a", instrument, 1, OrderType.Limit, 100), bar.CloseTime);
-    Throws<InvalidOperationException>(() => book.ExecuteCompletedClose(limit, bar));
-    var stale = book.Submit(new("a", instrument, 1), bar.CloseTime.AddMinutes(1));
-    Throws<InvalidOperationException>(() => book.ExecuteCompletedClose(stale, bar));
-});
-Test("Legacy daily execution retains the terminal projection without exposing future bars", () =>
-{
-    var fixture = Data(100, 102, 101);
-    var data = fixture with { Interval = BarInterval.Daily,
-        Bars = fixture.Bars.Select((b, i) => b with { OpenTime = start.AddDays(i), CloseTime = start.AddDays(i + 1) }).ToList() };
-    data.Bars[1] = data.Bars[1] with { Open = 100, High = 110, Low = 99 };
-    var result = Run(new CallbackStrategy(onBar: (c, _) =>
-    {
-        var count = c.History(instrument, 10).Count;
-        if (count == 1) c.Submit(new("a", instrument, 1));
-        if (count == 3) c.Submit(new("a", instrument, -1));
-        Equal(count, c.History(instrument, 10).Count);
-    }), data, new() { ExecuteMarketOrdersAtCompletedClose = true, CompletedCloseTickSize = .01m, ZorroDailySlippageSeconds = 5 });
-    Equal(100.17m, result.Fills[0].Price); Equal(101.17m, result.Fills[1].Price);
-    Equal(0m, result.Fills.Sum(f => f.ExecutionCost));
-    Equal(1001m, result.Final.Equity);
-});
 Test("Strategy folders select named backtests and resolve paths independently of the working directory", () =>
 {
     var root = Temporary();
@@ -737,6 +663,77 @@ MarketDataset CombinedSeasonalityData()
         return b with { Instrument = new("US", AssetClass.Equity, symbol), Open = price, High = price, Low = price, Close = price };
     })).ToList() };
 }
+// Supply enough daily observations for the source portfolio warmup, ending on a Thursday entry date.
+MarketDataset ZorroData()
+{
+    var sessions = new List<MarketSession>();
+    for (var date = new DateTime(2024, 1, 2); date <= new DateTime(2024, 8, 29); date = date.AddDays(1))
+        if (date.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+            sessions.Add(new(new DateTimeOffset(date.AddHours(14), TimeSpan.Zero), new DateTimeOffset(date.AddHours(21), TimeSpan.Zero)));
+    var symbols = new[] { "SCHB", "TLT", "GLDM", "UGA", "UVXY", "VXZ", "SVXY", "VIXY" };
+    return new() { Sessions = sessions, Bars = sessions.SelectMany((session, index) => symbols.Select((symbol, asset) =>
+    {
+        var price = 100m + (index + asset) % 9;
+        return new Bar(new("fixture", AssetClass.Equity, symbol), session.Open, session.Close, price, price + 2, price - 2, price + 1, 10000, true, true);
+    })).ToList() };
+}
+Test("Source portfolio uses pre-close calendar auctions and next-open price signals", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "ZorroPortfolio.cs"));
+    var data = ZorroData(); var config = Config() with { InitialCash = 17000 };
+    var result = new BacktestEngine().Run(compiled.Strategy, data, config);
+    Equal(9, result.Equity.First().Substrategies.Count);
+    var gold = result.Fills.Where(f => f.Substrategy == "GoldSeason").ToArray();
+    True(gold.Length > 0);
+    foreach (var fill in gold)
+    {
+        var accepted = result.Orders.Single(o => o.OrderId == fill.OrderId && o.Status == OrderStatus.Accepted);
+        Equal(OrderType.MarketOnClose, accepted.Request.Type);
+        Equal(fill.Time.AddMinutes(-1), accepted.Time);
+        var bar = data.Bars.Single(b => b.Instrument == fill.Instrument && b.CloseTime == fill.Time);
+        Equal(bar.Close, fill.Price);
+        if (fill.Quantity > 0)
+        {
+            Equal(DayOfWeek.Thursday, fill.Time.DayOfWeek);
+            var previous = data.Bars.Last(b => b.Instrument == fill.Instrument && b.CloseTime < accepted.Time);
+            Equal(Math.Floor(1256m / previous.Close), fill.Quantity);
+        }
+    }
+    var signals = result.Fills.Where(f => f.Substrategy is "VIXHedge" or "VIXBasis" or "EqBondPair" or "RiskPremia" or "EqBondReversion").ToArray();
+    True(signals.Any(f => f.Substrategy == "VIXHedge"));
+    foreach (var fill in signals)
+    {
+        var accepted = result.Orders.Single(o => o.OrderId == fill.OrderId && o.Status == OrderStatus.Accepted);
+        if (accepted.Request.Type != OrderType.Market) continue;
+        True(accepted.Time < fill.Time);
+        var bar = data.Bars.Single(b => b.Instrument == fill.Instrument && b.OpenTime == fill.Time);
+        Equal(bar.Open, fill.Price);
+    }
+    // A month-end long-to-short reversal is one net sale, and the final Thursday entry remains marked open.
+    True(result.Fills.Any(f => f.Substrategy == "BondSeason" && f.Quantity < -30));
+    True(result.Final.Positions.Any(p => p.Substrategy == "GoldSeason" && p.Quantity > 0));
+    var repeated = new BacktestEngine().Run(compiled.Strategy, data, config);
+    True(result.Fills.SequenceEqual(repeated.Fills));
+});
+Test("Source portfolio decisions do not depend on unobserved closing prices", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "ZorroPortfolio.cs"));
+    var data = ZorroData(); var config = Config() with { InitialCash = 17000 };
+    var last = data.Sessions[^1].Close;
+    var changed = data with { Bars = data.Bars.Select(b => b.CloseTime == last
+        ? b with { High = b.High + 20, Close = b.Close + 20 } : b).ToList() };
+    var before = new BacktestEngine().Run(compiled.Strategy, data, config);
+    var after = new BacktestEngine().Run(compiled.Strategy, changed, config);
+    True(before.Orders.Where(o => o.Time < last).SequenceEqual(after.Orders.Where(o => o.Time < last)));
+    True(before.Fills.Where(f => f.Time < last).SequenceEqual(after.Fills.Where(f => f.Time < last)));
+    Equal(before.Fills.Single(f => f.Substrategy == "GoldSeason" && f.Time == last).Quantity,
+        after.Fills.Single(f => f.Substrategy == "GoldSeason" && f.Time == last).Quantity);
+});
+Test("Removed immediate-fill configuration fields are rejected", () =>
+{
+    foreach (var name in new[] { "executeMarketOrdersAtCompletedClose", "completedCloseTickSize", "zorroDailySlippageSeconds" })
+        Throws<JsonException>(() => JsonSerializer.Deserialize<SimulationOptions>("{\"" + name + "\":1}", Json.Options));
+});
 Test("Combined strategy registers ten sleeves and trades holiday gold, oil and winter gas", () =>
 {
     using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "SeasonalityRiskPremia.cs"));
