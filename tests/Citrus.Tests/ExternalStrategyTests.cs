@@ -8,6 +8,28 @@ internal static class ExternalStrategyTests
     /// <summary>Registers integration cases with the offline regression runner.</summary>
     internal static void Register(Action<string, Action> test)
     {
+        test("Strategy discovery filters runnable classes without constructing them and sees rebuilt output", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "citrus-discovery-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var assembly = Path.Combine(root, "Strategies.dll");
+            const string source = """
+                public abstract class Base : Citrus.Trading.IStrategy {
+                    public void OnStart(Citrus.Trading.IStrategyContext c) {}
+                    public void OnBar(Citrus.Trading.IStrategyContext c, System.Collections.Generic.IReadOnlyList<Citrus.Trading.Bar> b) {}
+                }
+                public class Runnable : Base { public Runnable() { throw new System.Exception("Do not construct during discovery"); } }
+                internal class Hidden : Base {}
+                public class Generic<T> : Base {}
+                public class Arguments : Base { public Arguments(int value) {} }
+                """;
+            Emit(assembly, source);
+            if (!CompiledStrategy.DiscoverAssembly(assembly).SequenceEqual(new[] { "Runnable" }))
+                throw new Exception("Discovery included a non-runnable class or constructed a strategy.");
+            Emit(assembly, source.Replace("Runnable", "Renamed"));
+            if (!CompiledStrategy.DiscoverAssembly(assembly).SequenceEqual(new[] { "Renamed" }))
+                throw new Exception("Discovery retained a stale assembly after rebuilding.");
+        });
         test("External assemblies select types and capture transitive dependencies and content", () =>
         {
             var root = Path.Combine(Path.GetTempPath(), "citrus-external-tests-" + Guid.NewGuid().ToString("N"));

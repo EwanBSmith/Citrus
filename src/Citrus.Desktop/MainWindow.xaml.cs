@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private bool configDirty;
     private bool loading;
     private bool busy;
+    private string? catalogRoot;
     /// <summary>Tracks initial asynchronous option discovery for the current workspace.</summary>
     internal Task OptionsReady { get; private set; } = Task.CompletedTask;
 
@@ -37,7 +38,12 @@ public partial class MainWindow : Window
         };
         Closing += OnClosing;
         Closed += (_, _) => { chart.Dispose(); ClearTables(); };
-        if (initialPath is not null) Loaded += (_, _) => Guard(() => LoadConfiguration(initialPath));
+        if (!DesktopSmokeTest.IsRunning)
+            Loaded += async (_, _) =>
+            {
+                await RefreshStrategiesAsync();
+                if (initialPath is not null) Guard(() => LoadConfiguration(initialPath));
+            };
     }
 
     /// <summary>Releases table storage after a completed run is replaced or the window closes.</summary>
@@ -67,6 +73,7 @@ public partial class MainWindow : Window
         switch (e.Parameter as string)
         {
             case "Open": Open(); break;
+            case "RefreshStrategies": _ = RefreshStrategiesAsync(); break;
             case "IDE": OpenDevelopmentEnvironment(); break;
             case "Example": CreateExample(); break;
             case "Save": SaveAll(); break;
@@ -108,7 +115,10 @@ public partial class MainWindow : Window
             var root = configPath is null ? null : StrategyFolder.Root(configPath);
             backtests.IsEnabled = root is not null;
             if (root is null) return;
-            foreach (var path in StrategyFolder.Backtests(root))
+            var config = configEditor.ReadConfiguration(validate: false);
+            var paths = root == catalogRoot && config.StrategyType is string type
+                ? StrategyCatalog.Backtests(root, type) : StrategyFolder.Backtests(root);
+            foreach (var path in paths)
             {
                 var name = Path.GetFileNameWithoutExtension(path);
                 var item = new MenuItem
@@ -147,11 +157,62 @@ public partial class MainWindow : Window
         try { action(); } catch (Exception exception) { ShowError(exception); }
     }
 
-    /// <summary>Prompts for an existing run configuration.</summary>
+    /// <summary>Shows the strategy list and refreshes it when first opened.</summary>
     private void Open()
     {
-        var dialog = new OpenFolderDialog { Title = "Open Citrus strategy folder" };
-        if (dialog.ShowDialog(this) == true) LoadConfiguration(dialog.FolderName);
+        tabs.SelectedIndex = 0;
+        strategies.Focus();
+        if (strategies.Items.Count == 0) _ = RefreshStrategiesAsync();
+    }
+
+    /// <summary>Builds the main project away from the dispatcher and lists runnable strategy classes.</summary>
+    internal async Task RefreshStrategiesAsync()
+    {
+        if (busy) return;
+        try
+        {
+            SetBusy(true, "Loading Citrus.Strategies...");
+            catalogRoot = StrategyCatalog.FindRoot();
+            var project = Path.Combine(catalogRoot, StrategyCatalog.Project);
+            var names = await Task.Run(() => CompiledStrategy.DiscoverAssembly(StrategyProject.Build(project)));
+            loading = true;
+            try
+            {
+                strategies.ItemsSource = names;
+                strategies.SelectedItem = configPath is null ? null : configEditor.ReadConfiguration(false).StrategyType;
+            }
+            finally { loading = false; }
+            catalogStatus.Text = names.Length == 0 ? "No runnable strategies found. Add a public strategy class, then Refresh."
+                : $"{names.Length} strategies — select one to load its backtest settings.";
+            status.Text = "Ready — select a strategy";
+        }
+        catch (Exception exception)
+        {
+            catalogStatus.Text = "Could not load strategies. Fix the build errors in the execution log, then Refresh.";
+            ShowError(exception);
+        }
+        finally { SetBusy(false); }
+    }
+
+    /// <summary>Opens saved settings for the selected type, preserving edits if selection is cancelled.</summary>
+    private void StrategyChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (loading || busy || catalogRoot is null || strategies.SelectedItem is not string type) return;
+        Guard(() =>
+        {
+            try
+            {
+                if (!ConfirmEdits()) return;
+                configDirty = false;
+                LoadConfiguration(StrategyCatalog.Configuration(catalogRoot, type));
+            }
+            finally
+            {
+                loading = true;
+                try { strategies.SelectedItem = configPath is null ? null : configEditor.ReadConfiguration(false).StrategyType; }
+                finally { loading = false; }
+            }
+        });
     }
 
     /// <summary>Loads both documents only after reads succeed and outstanding edits are resolved.</summary>
@@ -172,6 +233,9 @@ public partial class MainWindow : Window
         }
         finally { loading = false; }
         configPath = fullPath; strategyPath = sourcePath; RefreshBacktests();
+        loading = true;
+        try { strategies.SelectedItem = configuration.StrategyType; }
+        finally { loading = false; }
         configDirty = false;
         ClearResults(); UpdateTitle();
         status.Text = fullPath;
@@ -350,7 +414,8 @@ public partial class MainWindow : Window
     {
         strategyPage.Header = "Strategy";
         strategyPage.ToolTip = strategyPath;
-        strategyDetails.Text = strategyPath is null ? "Open a strategy workspace to begin." : strategyPath;
+        strategyDetails.Text = strategyPath is null ? "Select a strategy above to begin."
+            : string.IsNullOrWhiteSpace(configEditor.StrategyType.Text) ? strategyPath : configEditor.StrategyType.Text;
         configPage.Header = "Configuration" + (configDirty ? " *" : "");
         Title = $"{(configPath is null ? "Citrus" : (StrategyFolder.Root(configPath) is string folder ? Path.GetFileName(folder) + " / " + Path.GetFileNameWithoutExtension(configPath) : Path.GetFileName(configPath)) + " — Citrus")} — Backtesting Workbench";
     }

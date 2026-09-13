@@ -26,7 +26,7 @@ dotnet build Citrus.slnx -c Release --no-restore
 dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore
 ```
 
-Open a strategy workspace containing `Backtests/*.json`, or pass a named configuration as the first application argument. Choose the project, strategy class and optional IDE solution in **Configuration**. **Open in IDE** opens the associated solution/project. Save code in the IDE before **Validate** (`F6`) or **Run backtest** (`F5`); both build external projects in Release and load the selected strategy. **Save configuration** (`Ctrl+S`) saves run settings. Build errors appear in the execution log. The .NET SDK is required for project builds; prebuilt assemblies need only the runtime.
+The workbench opens with a list of runnable classes discovered from `Citrus.Strategies`. Select a strategy to load its saved backtest settings, then press **F5** to run. **Refresh** rebuilds the list after adding or renaming a class. **Backtest → Select backtest** lists only configurations for the selected strategy. New strategies get their own configuration and results directory automatically. Advanced project paths remain available under **Configuration → Advanced strategy paths**; a named configuration may also be passed as the first application argument. **Open in IDE** opens the associated solution/project. Save code in the IDE before **Validate** (`F6`) or **Run backtest** (`F5`); both build external projects in Release and load the selected strategy. **Save configuration** (`Ctrl+S`) saves run settings. Build errors appear in the execution log. The .NET SDK is required for project builds; prebuilt assemblies need only the runtime.
 
 The embedded source editor and its language-service dependencies have been removed. The workbench retains named backtests, configuration, historical-data management, result tables and charts. **Create example** provides a small external C# project and solution with a copy of the running Citrus API for offline runs.
 
@@ -38,7 +38,7 @@ Strategies live in this repository and the main `Citrus.slnx` solution. Edit `sr
 
 Open `Citrus.slnx` in Visual Studio or Rider and edit the strategies in `Citrus.Strategies`. Use the desktop or CLI to execute backtests; no additional runner or strategy test project is required.
 
-Launch the workbench from the repository root with `dotnet run --project src/Citrus.Desktop -c Release -- .`. Default, Demo and Comparison configurations live in `Backtests/`; they open this same solution through **Open in IDE**. Save source in your IDE, then press F5 in Citrus to build and run. Results go to `Results/<backtest-name>` and are excluded from Git.
+Launch the workbench with `dotnet run --project src/Citrus.Desktop -c Release` and select a strategy from the list. The checkout is located automatically from the application or working directory. Default, Demo and Comparison configurations live in `Backtests/`; they open this same solution through **Open in IDE**. Save source in your IDE, then press F5 in Citrus to build and run. Results go to `Results/<backtest-name>` and are excluded from Git.
 
 ```powershell
 # Run ZorroPortfolio using the configured historical cache.

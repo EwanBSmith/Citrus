@@ -6,6 +6,7 @@ The source requirements remain unchanged. This table maps first-release requirem
 | --- | --- | --- |
 | UR-PLAT-001, 003/003A/B/C, 006/007; UR-SCOPE-001 | .NET 10 projects, CLI, external project/assembly loader and legacy Roslyn source loader, independent strategy contract | Build, compiler diagnostics test, CLI examples, cross-platform CI |
 | UR-PLAT-003D | StrategyOptions and shared StrategyConfiguration resolution before data/account initialization; GUI field locks | Explicit zero/false/null precedence, early validation, direct engine data bounds, effective manifests, WPF lock/refresh checks |
+| UR-PLAT-003E | Main-project strategy discovery and desktop catalog with matching backtest selection | Discovery filtering and rebuild regression; WPF strategy switching, option loading, and new-configuration checks |
 | UR-PLAT-004; UR-BT-004; UR-STRAT-004; UR-TEST-002 | Shared context with explicit runtime mode | Backtest/fake live-context decision equivalence test; no real live adapter |
 | UR-BRK-003–009 | Equity/perpetual ledgers, execution prices, fees, independent seeded residual rejection | Margin, borrow, funding, liquidation, costs and seeded outcome tests |
 | UR-DATA-001/002 | Alpaca raw bars/actions/calendar; Hyperliquid candles/funding | Offline HTTP pagination, normalization, calendar and missing-history fixtures |

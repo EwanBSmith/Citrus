@@ -74,6 +74,23 @@ public sealed class CompiledStrategy : IDisposable
     /// <summary>Requests unloading of the strategy assembly context; collection requires outstanding references to be released.</summary>
     public void Dispose() => context.Unload();
 
+    /// <summary>Lists runnable strategy types without constructing them or locking their build output.</summary>
+    public static string[] DiscoverAssembly(string assemblyPath)
+    {
+        assemblyPath = Path.GetFullPath(assemblyPath);
+        var context = new StrategyLoadContext([], assemblyPath);
+        try
+        {
+            using var stream = new MemoryStream(File.ReadAllBytes(assemblyPath));
+            var assembly = context.LoadFromStream(stream);
+            return assembly.GetTypes().Where(t => typeof(IStrategy).IsAssignableFrom(t)
+                && t is { IsClass: true, IsAbstract: false, IsVisible: true, ContainsGenericParameters: false }
+                && t.GetConstructor(Type.EmptyTypes) is not null)
+                .Select(t => t.FullName!).Order(StringComparer.Ordinal).ToArray();
+        }
+        finally { context.Unload(); }
+    }
+
     /// <summary>Builds or loads a configured strategy through the same path for desktop and CLI callers.</summary>
     public static CompiledStrategy LoadConfiguration(string configurationPath, RunConfiguration configuration)
     {

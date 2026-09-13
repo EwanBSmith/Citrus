@@ -96,6 +96,22 @@ internal static class DesktopSmokeTest
 
             var window = new MainWindow(null, exampleLibrary);
             ShowHidden(window); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            await window.RefreshStrategiesAsync();
+            Require(window.strategies.Items.Contains("Citrus.Strategies.DemoHold")
+                && window.strategies.Items.Contains("ZorroPortfolio"), "The main strategy catalog did not discover both strategies.");
+            window.strategies.SelectedItem = "ZorroPortfolio";
+            await window.OptionsReady;
+            Require(window.configEditor.ReadConfiguration().InitialCash == 17000
+                && window.backtests.Items.Count == 2, "Catalog selection did not apply strategy options and filter named backtests.");
+            window.strategies.SelectedItem = "Citrus.Strategies.DemoHold";
+            await window.OptionsReady;
+            Require(window.configEditor.ReadConfiguration().StrategyType == "Citrus.Strategies.DemoHold"
+                && window.backtests.Items.Count == 1, "Selecting another strategy retained the previous backtests.");
+            await CaptureAsync(window, Path.Combine(directory, "strategy-list.png"), 1280, 850);
+            var catalogFixture = Path.Combine(directory, "catalog-fixture");
+            var newConfiguration = StrategyCatalog.Configuration(catalogFixture, "New.Strategy");
+            Require(StrategyCatalog.Configuration(catalogFixture, "New.Strategy") == newConfiguration
+                && StrategyFolder.Read(newConfiguration).StrategyType == "New.Strategy", "New strategy settings were not created and reused.");
             window.LoadConfiguration(StrategyFolder.Root(path)!);
             await window.OptionsReady;
             window.backtests.Items.Cast<MenuItem>().Single(item => item.Tag as string == "HigherCosts")

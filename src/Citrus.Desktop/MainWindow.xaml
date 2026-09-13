@@ -16,7 +16,7 @@
  <DockPanel>
   <Menu x:Name="menu" DockPanel.Dock="Top">
    <MenuItem Header="_File">
-    <MenuItem Header="_Open strategy…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Open" InputGestureText="Ctrl+O"/>
+    <MenuItem Header="_Strategies" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Open" InputGestureText="Ctrl+O"/>
     <MenuItem Header="Create _example…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Example" InputGestureText=""/>
     <MenuItem Header="Open in _IDE" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="IDE"/>
     <MenuItem Header="_Save configuration" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Save" InputGestureText="Ctrl+S"/>
@@ -41,7 +41,7 @@
    </MenuItem>
   </Menu>
   <StatusBar DockPanel.Dock="Bottom">
-   <StatusBarItem><TextBlock x:Name="status" Text="Ready — open a strategy folder or create an example" TextTrimming="CharacterEllipsis"/></StatusBarItem>
+   <StatusBarItem><TextBlock x:Name="status" Text="Ready — select a strategy" TextTrimming="CharacterEllipsis"/></StatusBarItem>
    <StatusBarItem><ProgressBar x:Name="progress" Width="120" Height="14" IsIndeterminate="True" Visibility="Collapsed"/></StatusBarItem>
   </StatusBar>
   <Grid Margin="6">
@@ -67,13 +67,18 @@
     <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="260"/><RowDefinition Height="5"/><RowDefinition Height="100" MinHeight="60"/></Grid.RowDefinitions>
     <TabControl x:Name="tabs">
      <TabItem x:Name="strategyPage" Header="Strategy">
-      <StackPanel Margin="24">
-       <TextBlock Text="Develop strategies in your IDE" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,16"/>
+      <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="24">
+       <DockPanel Margin="0,0,0,12">
+        <Button DockPanel.Dock="Right" Content="Refresh" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="RefreshStrategies"/>
+        <TextBlock Text="Citrus.Strategies" FontSize="22" FontWeight="SemiBold"/>
+       </DockPanel>
+       <TextBlock x:Name="catalogStatus" Text="Loading strategies..." TextWrapping="Wrap" Margin="0,0,0,8"/>
+       <ListBox x:Name="strategies" Height="180" Margin="0,0,0,16" SelectionChanged="StrategyChanged" AutomationProperties.Name="Strategies"/>
        <TextBlock Text="Open your strategy solution in Visual Studio or Rider to edit, test and debug. Save your code in the IDE before validating or running a backtest." TextWrapping="Wrap" Margin="0,0,0,16"/>
-       <TextBlock x:Name="strategyDetails" Text="Open a strategy workspace to begin." TextWrapping="Wrap" Margin="0,0,0,16"/>
+       <TextBlock x:Name="strategyDetails" Text="Select a strategy above to begin." TextWrapping="Wrap" Margin="0,0,0,16"/>
        <Button Content="Open in IDE" HorizontalAlignment="Left" Padding="16,8" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="IDE"/>
-       <TextBlock Text="Choose the project and strategy class in Configuration. Validate and Run build the project in Release and report build errors in the execution log." TextWrapping="Wrap" Margin="0,20,0,0"/>
-      </StackPanel>
+       <TextBlock Text="Select saved settings from Backtest → Select backtest. Press F5 to build and run, or F6 to refresh settings defined in C#. Use Refresh after adding a strategy class." TextWrapping="Wrap" Margin="0,20,0,0"/>
+      </StackPanel></ScrollViewer>
      </TabItem>
      <TabItem x:Name="configPage" Header="Configuration">
       <DockPanel><TextBlock DockPanel.Dock="Top" Text="Paths are relative to the strategy folder. Rates and margins use fractions: 0.05 = 5%." Margin="8" TextWrapping="Wrap"/>
