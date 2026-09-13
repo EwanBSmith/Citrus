@@ -79,7 +79,7 @@ public sealed class HyperliquidProvider(HttpClient client) : IMarketDataProvider
     }
 }
 
-/// <summary>Aggregates raw equity minute bars within explicit sessions and normalizes supported corporate actions.</summary>
+/// <summary>Aggregates adjusted equity minute bars within explicit sessions.</summary>
 public sealed class AlpacaProvider(HttpClient client, string keyId, string secret, IReadOnlyList<MarketSession> sessions, string feed = "iex") : IMarketDataProvider
 {
     /// <summary>Gets the provider identity used for provenance and cache partitioning.</summary>
@@ -102,7 +102,7 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
         var tokens = new HashSet<string>();
         do
         {
-            var url = $"https://data.alpaca.markets/v2/stocks/bars?symbols={Uri.EscapeDataString(request.Instrument.Symbol)}&timeframe=1Min&adjustment=raw&feed={Uri.EscapeDataString(feed)}&start={Uri.EscapeDataString(request.Start.ToString("O"))}&end={Uri.EscapeDataString(request.End.ToString("O"))}&limit=10000";
+            var url = $"https://data.alpaca.markets/v2/stocks/bars?symbols={Uri.EscapeDataString(request.Instrument.Symbol)}&timeframe=1Min&adjustment=all&feed={Uri.EscapeDataString(feed)}&start={Uri.EscapeDataString(request.Start.ToString("O"))}&end={Uri.EscapeDataString(request.End.ToString("O"))}&limit=10000";
             if (page is not null) url += "&page_token=" + Uri.EscapeDataString(page);
             using var document = await Get(url, cancellationToken);
             if (document.RootElement.GetProperty("bars").TryGetProperty(request.Instrument.Symbol, out var values))
@@ -120,53 +120,8 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
             bars.Add(new(request.Instrument, open, close, slice[0].Open, slice.Max(r => r.High), slice.Min(r => r.Low), slice[^1].Close,
                 slice.Sum(r => r.Volume), sessions.Any(s => s.Open == open), sessions.Any(s => s.Close == close)));
         }
-        var actions = await CorporateActionsAsync(request, cancellationToken);
-        return new() { Provider = Name, Interval = request.Interval, Bars = bars, Sessions = sessions.ToList(), CorporateActions = actions,
-            Notes = ["Regular-session aggregation of raw minute bars; missing trade minutes are not synthesized. Corporate action API filters process dates; verify effective-date coverage with supplementary events."] };
-    }
-    /// <summary>Fetches process-date-filtered actions and resolves supported terms at effective session opens; incomplete or unsupported terms fail.</summary>
-    public async Task<List<CorporateAction>> CorporateActionsAsync(DataRequest request, CancellationToken token = default)
-    {
-        var result = new List<CorporateAction>(); string? page = null;
-        var tokens = new HashSet<string>();
-        do
-        {
-            var url = $"https://data.alpaca.markets/v1/corporate-actions?symbols={Uri.EscapeDataString(request.Instrument.Symbol)}&start={request.Start:yyyy-MM-dd}&end={request.End:yyyy-MM-dd}&limit=1000&data_quality=all";
-            if (page is not null) url += "&page_token=" + Uri.EscapeDataString(page);
-            using var doc = await Get(url, token);
-            foreach (var group in doc.RootElement.GetProperty("corporate_actions").EnumerateObject())
-                foreach (var row in group.Value.EnumerateArray())
-                {
-                    // Read a required string field from the current corporate-action row, rejecting null values.
-                    string S(string name) => row.GetProperty(name).GetString() ?? throw new InvalidDataException($"Corporate action missing {name}.");
-                    // Read a decimal corporate-action field whether encoded as a string or number.
-                    decimal N(string name) => ProviderHttp.Number(row, name);
-                    var sourceField = group.Name is "cash_mergers" or "stock_mergers" or "stock_and_cash_mergers" ? "acquiree_symbol"
-                        : group.Name == "name_changes" ? "old_symbol" : "symbol";
-                    if (row.TryGetProperty(sourceField, out var sourceSymbol) && sourceSymbol.GetString() != request.Instrument.Symbol) continue;
-                    var dateField = row.TryGetProperty("ex_date", out _) ? "ex_date" : row.TryGetProperty("effective_date", out _) ? "effective_date" : "process_date";
-                    var date = DateOnly.Parse(S(dateField), CultureInfo.InvariantCulture);
-                    var session = sessions.FirstOrDefault(s => DateOnly.FromDateTime(s.Open.UtcDateTime) == date)
-                        ?? throw new InvalidDataException("Corporate action effective date lacks a session; supply normalized action data.");
-                    var id = S("id");
-                    var instrument = request.Instrument;
-                    CorporateAction action = group.Name switch
-                    {
-                        "forward_splits" or "reverse_splits" => new(id, instrument, session.Open, ActionType.Split, Ratio: N("new_rate") / N("old_rate")),
-                        "cash_dividends" => new(id, instrument, session.Open, ActionType.Dividend, Amount: N("rate")),
-                        "cash_mergers" => new(id, instrument, session.Open, ActionType.Merger, Amount: N("rate")),
-                        "stock_mergers" or "stock_and_cash_mergers" => new(id, instrument, session.Open, ActionType.Merger,
-                            Amount: group.Name == "stock_and_cash_mergers" ? N("cash_rate") : 0, Ratio: N("acquirer_rate") / N("acquiree_rate"), Successor: instrument with { Symbol = S("acquirer_symbol") }),
-                        "name_changes" => new(id, instrument, session.Open, ActionType.SymbolChange, Successor: instrument with { Symbol = S("new_symbol") }),
-                        "worthless_removals" => new(id, instrument, session.Open, ActionType.Delisting, Amount: 0),
-                        _ => throw new InvalidDataException($"Unsupported corporate action {group.Name}/{id}; supply explicit normalized events.")
-                    };
-                    if (action.Time >= request.Start && action.Time <= request.End) result.Add(action);
-                }
-            page = doc.RootElement.TryGetProperty("next_page_token", out var next) ? next.GetString() : null;
-            if (page is not null && !tokens.Add(page)) throw new InvalidDataException("Repeated corporate-action page token.");
-        } while (page is not null);
-        return result;
+        return new() { Provider = Name, Interval = request.Interval, Bars = bars, Sessions = sessions.ToList(),
+            Notes = ["Regular-session aggregation of adjusted minute bars (adjustment=all); missing trade minutes are not synthesized. Returns include provider price adjustments, with no separate corporate-action accounting."] };
     }
     /// <summary>Fetches exchange sessions and converts New York local boundaries to UTC with daylight-saving rules.</summary>
     public static async Task<List<MarketSession>> CalendarAsync(HttpClient client, string keyId, string secret, DateOnly start, DateOnly end, CancellationToken token = default)

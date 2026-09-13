@@ -72,7 +72,7 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-DATA-001** Citrus shall obtain historical market data from the Alpaca API.
 - **UR-DATA-002** Citrus shall obtain historical market data from the Hyperliquid API.
 - **UR-DATA-003** Citrus shall cache downloaded historical data and shall not redownload data already present and valid in the cache.
-- **UR-DATA-004** Citrus shall account for dividends, splits, and mergers when processing equities data.
+- **UR-DATA-004** Citrus shall import provider-adjusted equity OHLC prices, including adjusted close, without separate dividend, split, merger, symbol-change, or delisting processing.
 - **UR-DATA-005** Citrus shall provide a geometric or arithmetic Brownian-motion data generator, as selected in the detailed design, for simulated prices.
 - **UR-DATA-006** Citrus shall initially support daily and hourly data intervals.
 - **UR-DATA-007** The market-data architecture shall permit additional data intervals to be added later.
@@ -131,7 +131,7 @@ The following decisions are needed before the requirements can be made fully tes
 2. Define the strategy event model, including startup, data arrival, scheduled execution, order updates, fills, shutdown, and recovery after interruption.
 3. Define the order-netting rules, including how compatible orders are combined, how opposing orders interact, whether order types and limits may be combined, and how fills and costs are attributed to their originating substrategies.
 4. Define backtest execution assumptions for each order type, including bar timing, fill price, limit-order fills, commissions, liquidity, partial fills, rejected orders, and look-ahead prevention.
-5. Clarify whether equity data must be raw or adjusted and how dividends, splits, symbol changes, delistings, and mergers affect both prices and portfolio holdings.
+5. Resolved: equity data uses adjusted OHLC prices. Corporate actions are not simulated separately; holdings and order quantities change only through execution.
 6. Define the portfolio accounting model for cash, buying power, margin, leverage, borrow availability and fees, funding payments, and cryptocurrency perpetual liquidation.
 7. Define the optimisation objective, parameter types and ranges, constraints, search methods, parallelism, and the exact walk-forward train and test procedure.
 8. Define live-trading reliability requirements, including persistent state, idempotent order submission, reconciliation with the broker, restart behaviour, stale-data detection, retries, logging, alerts, and emergency shutdown.

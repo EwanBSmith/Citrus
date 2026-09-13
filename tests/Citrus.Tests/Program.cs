@@ -478,28 +478,54 @@ Test("MOC cannot fill the close that produced its decision", () =>
     var data = Equities(); var result = Run(new CallbackStrategy(onBar: (c, _) => { if (c.History(equity, 10).Count == 1) c.Submit(new("a", equity, 1, OrderType.MarketOnClose)); }), data);
     Equal(data.Bars[1].CloseTime, result.Fills.Single().Time);
 });
-Test("Split adjusts positions and outstanding limits", () =>
+Test("Adjusted equity returns preserve quantities and reconcile without cash income", () =>
 {
-    var data = Equities(); data.CorporateActions.Add(new("split", equity, data.Bars[1].OpenTime, ActionType.Split, Ratio: 2));
-    var result = Run(new CallbackStrategy(onStart: c => { c.Submit(new("a", equity, 1)); c.Submit(new("a", equity, 1, OrderType.Limit, 90)); }), data);
-    Equal(2m, result.Final.Positions.Single().Quantity); Equal(1000m, result.Final.Equity); Equal(45m, result.Orders.Last(o => o.Request.Type == OrderType.Limit).Request.LimitPrice);
+    var data = Equities();
+    data.Bars[0] = data.Bars[0] with { Open = 50, High = 50, Low = 50, Close = 50 };
+    data.Bars[1] = data.Bars[1] with { Open = 51, High = 53, Low = 50, Close = 52 };
+    var result = Run(new CallbackStrategy(onStart: c =>
+    {
+        c.Buy("a", equity, 3);
+        c.BuyLimit("a", equity, 1, 40);
+    }), data);
+    Equal(3m, result.Final.Positions.Single().Quantity);
+    Equal(50m, result.Final.Positions.Single().AveragePrice);
+    Equal(1006m, result.Final.Equity);
+    Equal(6m, result.Attribution.Sum(a => a.NetPnl));
+    Equal(40m, result.Orders.Last(o => o.Request.Type == OrderType.Limit).Request.LimitPrice);
+    True(result.Costs.All(c => c.Kind == "Commission"));
+    var shortResult = Run(new CallbackStrategy(onStart: c => c.Sell("a", equity, 3)), data, new() { AnnualBorrowRate = .1m });
+    True(shortResult.Costs.Any(c => c.Kind == "Borrow" && c.Amount < 0));
+    Equal(-3m, shortResult.Final.Positions.Single().Quantity);
 });
-Test("Dividends credit holdings and shorts incur borrow", () =>
+Test("Datasets round trip without version metadata and reject removed action fields", () =>
 {
-    var data = Equities(); data.Bars[1] = data.Bars[1] with { Open = 100, High = 100, Low = 100, Close = 100 };
-    data.CorporateActions.Add(new("dividend", equity, data.Bars[1].OpenTime, ActionType.Dividend, Amount: 2));
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", equity, 3))), data); Equal(1006m, result.Final.Equity);
-    result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", equity, -3))), data, new() { AnnualBorrowRate = 0.1m });
-    True(result.Costs.Any(c => c.Kind == "Borrow" && c.Amount < 0)); Equal(-6m, result.Costs.Single(c => c.Kind == "Dividend").Amount);
+    var path = Path.Combine(Temporary(), "history.json");
+    var data = Equities();
+    Json.Write(path, data);
+    var serialized = File.ReadAllText(path);
+    True(!serialized.Contains("corporateActions"));
+    var restored = Json.Read<MarketDataset>(path);
+    DatasetValidator.Validate(restored);
+    Equal(data.Bars[0], restored.Bars[0]);
+    Equal(data.Bars.Count, restored.Bars.Count);
+    var properties = JsonDocument.Parse(serialized).RootElement.EnumerateObject().Select(p => p.Name);
+    Equal("provider,interval,bars,sessions,funding,notes", string.Join(',', properties));
+    File.WriteAllText(path, serialized.Insert(serialized.IndexOf('{') + 1, "\"corporateActions\": [],"));
+    Throws<JsonException>(() => Json.Read<MarketDataset>(path));
 });
-Test("Cash merger closes holdings and records consideration", () =>
+Test("Adjusted equity cache reuses snapshots and rejects mixed-basis extension", () =>
 {
-    var data = Equities(); data.CorporateActions.Add(new("merger", equity, data.Bars[1].OpenTime, ActionType.Merger, Amount: 110));
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", equity, 2))), data); Equal(1020m, result.Final.Equity); Equal(0m, result.Final.Positions.Single().Quantity);
-});
-Test("Unresolved corporate actions fail validation", () =>
-{
-    var data = Equities(); data.CorporateActions.Add(new("unknown", equity, data.Bars[1].OpenTime, ActionType.Delisting)); Throws<InvalidDataException>(() => DatasetValidator.Validate(data));
+    var data = Equities(); var directory = Temporary(); var cache = new DataCache(directory);
+    var provider = new FixtureProvider(data);
+    var request = new DataRequest(equity, BarInterval.Daily, data.Sessions[0].Open, data.Sessions[0].Close);
+    cache.GetAsync(provider, request, data.Sessions).GetAwaiter().GetResult();
+    cache.GetAsync(provider, request, data.Sessions).GetAwaiter().GetResult();
+    Equal(1, provider.Requests.Count);
+    var path = Directory.GetFiles(directory, "*.json").Single(); var original = File.ReadAllText(path);
+    Throws<InvalidDataException>(() => cache.GetAsync(provider, request with { End = data.Sessions[1].Close }, data.Sessions).GetAwaiter().GetResult());
+    Equal(original, File.ReadAllText(path)); Equal(1, provider.Requests.Count);
+    Equal(1, DataCache.Load(directory, BarInterval.Daily).Bars.Count);
 });
 Test("Unavailable equity shorts reject", () =>
 {
@@ -524,22 +550,7 @@ Test("Session gaps and holidays do not synthesize bars", () =>
     Equal(2, DatasetValidator.Expected(equity, BarInterval.Daily, sessions[0].Open, sessions[1].Close, sessions).Count);
     Equal(11, DatasetValidator.Expected(equity, BarInterval.Hourly, sessions[0].Open, sessions[1].Close, sessions).Count);
 });
-Test("Stock and cash merger combines already-held successor and reconciles", () =>
-{
-    var data = Equities(); var successor = equity with { Symbol = "NEW" };
-    data.Bars.AddRange(data.Bars.ToArray().Select(b => b with { Instrument = successor, Open = 20, High = 20, Low = 20, Close = 20 }));
-    data.CorporateActions.Add(new("exchange", equity, data.Sessions[1].Open, ActionType.Merger, Amount: 10, Ratio: 5, Successor: successor));
-    var result = Run(new CallbackStrategy(onStart: c => { c.Submit(new("a", equity, 2)); c.Submit(new("a", successor, 3)); }), data);
-    Equal(13m, result.Final.Positions.Single(p => p.Instrument == successor).Quantity);
-    Equal(1020m, result.Final.Equity); Equal(20m, result.Attribution.Sum(p => p.NetPnl));
-});
-Test("Retired instruments reject new orders", () =>
-{
-    var data = Equities(); data.CorporateActions.Add(new("delist", equity, data.Sessions[1].Open, ActionType.Delisting, Amount: 0));
-    var result = Run(new CallbackStrategy(onBar: (c, _) => { if (c.History(equity, 2).Count == 2) c.Submit(new("a", equity, 1)); }), data);
-    Equal(OrderStatus.Rejected, result.Orders.Single().Status);
-});
-Test("Alpaca pagination aggregates raw regular-session minutes", () =>
+Test("Alpaca pagination aggregates adjusted regular-session minutes", () =>
 {
     var calls = 0; var data = Equities();
     using var http = new HttpClient(new ResponseHandler(message =>
@@ -547,22 +558,17 @@ Test("Alpaca pagination aggregates raw regular-session minutes", () =>
         calls++;
         True(message.Headers.Contains("APCA-API-KEY-ID"));
         var url = message.RequestUri!.ToString();
-        var body = url.Contains("corporate-actions") ? "{\"corporate_actions\":{},\"next_page_token\":null}" :
+        True(url.Contains("adjustment=all"));
+        True(!url.Contains("corporate-actions"));
+        var body =
             url.Contains("page_token=p2") ? "{\"bars\":{\"ABC\":[{\"t\":\"2024-03-08T14:31:00Z\",\"o\":101,\"h\":103,\"l\":99,\"c\":102,\"v\":20}]},\"next_page_token\":null}" :
             "{\"bars\":{\"ABC\":[{\"t\":\"2024-03-08T14:30:00Z\",\"o\":100,\"h\":101,\"l\":98,\"c\":101,\"v\":10}]},\"next_page_token\":\"p2\"}";
         return new(HttpStatusCode.OK) { Content = new StringContent(body) };
     }));
     var result = new AlpacaProvider(http, "key", "secret", data.Sessions).FetchAsync(new(equity, BarInterval.Daily, data.Sessions[0].Open, data.Sessions[0].Close)).GetAwaiter().GetResult();
-    Equal(3, calls); Equal(100m, result.Bars.Single().Open); Equal(102m, result.Bars.Single().Close); Equal(30m, result.Bars.Single().Volume);
-});
-Test("Alpaca corporate action fields normalize explicit terms", () =>
-{
-    var data = Equities();
-    using var http = new HttpClient(new ResponseHandler(_ => new(HttpStatusCode.OK) { Content = new StringContent("""
-        {"corporate_actions":{"forward_splits":[{"id":"split","ex_date":"2024-03-11","new_rate":2,"old_rate":1}],"cash_dividends":[{"id":"dividend","ex_date":"2024-03-11","rate":0.5}]},"next_page_token":null}
-        """) }));
-    var actions = new AlpacaProvider(http, "key", "secret", data.Sessions).CorporateActionsAsync(new(equity, BarInterval.Daily, data.Sessions[0].Open, data.Sessions[1].Close)).GetAwaiter().GetResult();
-    Equal(2m, actions.Single(a => a.Type == ActionType.Split).Ratio); Equal(0.5m, actions.Single(a => a.Type == ActionType.Dividend).Amount);
+    Equal(2, calls); Equal(100m, result.Bars.Single().Open); Equal(102m, result.Bars.Single().Close); Equal(30m, result.Bars.Single().Volume);
+    Equal(103m, result.Bars.Single().High); Equal(98m, result.Bars.Single().Low);
+    DatasetValidator.Validate(result);
 });
 Test("Alpaca calendar converts New York DST and early closes", () =>
 {

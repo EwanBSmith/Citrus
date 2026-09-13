@@ -7,8 +7,8 @@ public sealed class PendingOrder(long id, OrderRequest request, DateTimeOffset s
 {
     /// <summary>Gets the simulation-assigned order identifier.</summary>
     public long Id { get; } = id;
-    /// <summary>Gets or sets the request, including adjustments made for stock splits.</summary>
-    public OrderRequest Request { get; set; } = request;
+    /// <summary>Gets the accepted order request.</summary>
+    public OrderRequest Request { get; } = request;
     /// <summary>Gets the submission time used to determine event eligibility.</summary>
     public DateTimeOffset Submitted { get; } = submitted;
     /// <summary>Gets or sets signed units still awaiting execution.</summary>
@@ -21,7 +21,6 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
     private readonly Random random = new(seed);
     private long nextId;
     private readonly List<PendingOrder> pending = [];
-    private readonly HashSet<Instrument> retired = [];
     /// <summary>Gets notification order as indexes into the fill or update lists for sequential callback dispatch.</summary>
     public List<(bool IsFill, int Index)> Notifications { get; } = [];
     /// <summary>Gets order status changes in creation order.</summary>
@@ -30,7 +29,7 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
     public List<Fill> Fills { get; } = [];
     /// <summary>Gets accepted orders that still have an unfilled balance.</summary>
     public IReadOnlyList<PendingOrder> Pending => pending;
-    /// <summary>Validates a request and assigns an ID; retired instruments produce a rejection update.</summary>
+    /// <summary>Validates a request and assigns an ID.</summary>
     public long Submit(OrderRequest request, DateTimeOffset time)
     {
         if (!Enum.IsDefined(request.Type) || !Enum.IsDefined(request.TimeInForce) || !Enum.IsDefined(request.Instrument.AssetClass))
@@ -42,11 +41,6 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
         if (request.Instrument.AssetClass == AssetClass.LinearPerpetual && request.Type is OrderType.MarketOnOpen or OrderType.MarketOnClose)
             throw new ArgumentException("Perpetuals do not have opening or closing auctions.");
         var id = ++nextId;
-        if (retired.Contains(request.Instrument))
-        {
-            Update(new(id, request, OrderStatus.Rejected, time, "Instrument retired by corporate action"));
-            return id;
-        }
         pending.Add(new(id, request, time));
         Update(new(id, request, OrderStatus.Accepted, time));
         return id;
@@ -91,21 +85,6 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
     {
         Update(new(order.Id, order.Request, status, time, reason));
         pending.Remove(order);
-    }
-    /// <summary>Adjusts split orders or cancels and retires instruments that undergo conversion or delisting.</summary>
-    public void ApplyAction(CorporateAction action)
-    {
-        if (action.Type is ActionType.Merger or ActionType.Delisting or ActionType.SymbolChange) retired.Add(action.Instrument);
-        foreach (var order in pending.Where(o => o.Request.Instrument == action.Instrument).ToArray())
-        {
-            if (action.Type == ActionType.Split)
-            {
-                order.Remaining *= action.Ratio!.Value;
-                order.Request = order.Request with { Quantity = order.Request.Quantity * action.Ratio.Value, LimitPrice = order.Request.LimitPrice / action.Ratio.Value };
-            }
-            else if (action.Type is ActionType.Merger or ActionType.Delisting or ActionType.SymbolChange)
-                Cancel(order.Id, action.Time, "Corporate action: resubmit on successor instrument");
-        }
     }
     /// <summary>Executes orders eligible at the bar open or close and expires day orders at their applicable boundary.</summary>
     public void Execute(Bar bar, bool atClose)

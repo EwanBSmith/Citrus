@@ -9,7 +9,7 @@ The source requirements remain unchanged. This table maps first-release requirem
 | UR-BRK-003–009 | Equity/perpetual ledgers, execution prices, fees, independent seeded residual rejection | Margin, borrow, funding, liquidation, costs and seeded outcome tests |
 | UR-DATA-001/002 | Alpaca raw bars/actions/calendar; Hyperliquid candles/funding | Offline HTTP pagination, normalization, calendar and missing-history fixtures |
 | UR-DATA-003 | Coverage cache with atomic file replacement | Missing-range and cache reuse tests |
-| UR-DATA-004 | Explicit split/dividend/merger/symbol-change/delisting events | Corporate-action tests, successor aggregation and unresolved-event rejection |
+| UR-DATA-004 | Provider-adjusted equity OHLC; no separate corporate-action processing | Adjusted Alpaca request/aggregation, dataset round trips and removed-field rejection, adjusted-price P&L and cache snapshot tests |
 | UR-DATA-005–007 | Seeded geometric Brownian OHLC generator; extensible interval record | Deterministic generation and OHLC validation tests |
 | UR-DATA-008–010 | Main-cache runs with strategy-selected instruments; separate cached data downloads and captured assembled input | Cache assembly/slicing, multi-instrument orders and history, missing instrument data rejection, and cache reuse tests |
 | UR-BT-001–003, 005/006; UR-STRAT-006/007 | Registered substrategies, full instrument identity, compatible netting, virtual ledgers and exports | Crossing, residual rejection, attribution, reconciliation and exports tests |
@@ -22,6 +22,6 @@ The source requirements remain unchanged. This table maps first-release requirem
 
 ## Acceptance evidence and limits
 
-The tests cover deterministic next-bar decisions, compatible and incompatible netting, exact commission allocation, accounting and corporate actions, validation failures, cache reuse, provider pagination, credential-safe provider errors, compiler errors, and export totals. CI additionally executes CLI generation and backtests. The performance harness runs the research-scale daily and hourly cases with no timing threshold.
+The tests cover deterministic next-bar decisions, compatible and incompatible netting, exact commission allocation, accounting and adjusted equity prices, validation failures, cache reuse, provider pagination, credential-safe provider errors, compiler errors, and export totals. CI additionally executes CLI generation and backtests. The performance harness runs the research-scale daily and hourly cases with no timing threshold.
 
-HTTP tests use realistic offline fixtures, not credentials. Credentialed acceptance is opt-in: execute the documented `data download` commands with an entitled account and an available date range. Provider coverage/entitlements and historical action completeness cannot be established by offline tests. Funding mark approximation, daily dividend recognition, common settlement currency, full fills, and bar-based liquidation are documented in simulation rules and dataset metadata.
+HTTP tests use realistic offline fixtures, not credentials. Credentialed acceptance is opt-in: execute the documented `data download` commands with an entitled account and an available date range. Provider coverage/entitlements and historical adjustment completeness cannot be established by offline tests. Funding mark approximation, common settlement currency, full fills, and bar-based liquidation are documented in simulation rules and dataset metadata.

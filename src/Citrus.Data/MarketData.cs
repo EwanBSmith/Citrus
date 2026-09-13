@@ -8,8 +8,8 @@ public static class DatasetValidator
     /// <summary>Rejects malformed bars, sessions, and supplementary events; coverage is checked separately.</summary>
     public static void Validate(MarketDataset data)
     {
-        if (data.SchemaVersion != 1 || data.Interval.Minutes <= 0 || data.Bars.Count == 0)
-            throw new InvalidDataException("Dataset requires schemaVersion 1, a positive interval, and bars.");
+        if (data.Interval.Minutes <= 0 || data.Bars.Count == 0)
+            throw new InvalidDataException("Dataset requires a positive interval and bars.");
         foreach (var symbol in data.Bars.Select(b => b.Instrument).Distinct().GroupBy(i => i.Symbol, StringComparer.OrdinalIgnoreCase))
             if (symbol.Count() > 1)
                 throw new InvalidDataException($"Conflicting historical datasets for symbol '{symbol.Key}'. Keep one instrument definition per symbol and interval; provider and venue are metadata, not separate history keys.");
@@ -37,22 +37,6 @@ public static class DatasetValidator
                     bar.SessionOpen == (bar.OpenTime == s.Open) && bar.SessionClose == (bar.CloseTime == s.Close)))
                     throw new InvalidDataException("Equity bars must match explicit exchange sessions and boundary flags.");
             }
-        }
-        if (data.CorporateActions.Select(a => a.Id).Distinct(StringComparer.Ordinal).Count() != data.CorporateActions.Count)
-            throw new InvalidDataException("Duplicate corporate action IDs.");
-        foreach (var a in data.CorporateActions)
-        {
-            if (!Enum.IsDefined(a.Type) || a.Instrument.AssetClass != AssetClass.Equity || a.Time.Offset != TimeSpan.Zero || string.IsNullOrWhiteSpace(a.Id) ||
-                a.Type == ActionType.Split && a.Ratio is not > 0 || a.Type == ActionType.Dividend && a.Amount is null or < 0 ||
-                a.Type == ActionType.SymbolChange && (a.Successor is null || a.Ratio is not (null or 1)) ||
-                a.Type == ActionType.Merger && (a.Amount is null && a.Successor is null || a.Successor is not null && a.Ratio is not > 0) ||
-                a.Type == ActionType.Delisting && a.Amount is null || a.Amount < 0)
-                throw new InvalidDataException($"Unresolved corporate action {a.Id}: explicit terms required.");
-            if (a.Successor is not null && (a.Successor == a.Instrument || a.Successor.AssetClass != AssetClass.Equity))
-                throw new InvalidDataException($"Corporate action {a.Id} requires a different successor equity.");
-            if (a.Type == ActionType.Merger && a.Successor is null && a.Ratio is not null ||
-                a.Type == ActionType.Delisting && (a.Successor is not null || a.Ratio is not null))
-                throw new InvalidDataException($"Corporate action {a.Id} contains inconsistent settlement terms.");
         }
         foreach (var f in data.Funding)
             if (f.Instrument.AssetClass != AssetClass.LinearPerpetual || f.Time.Offset != TimeSpan.Zero || f.MarkPrice <= 0)
@@ -91,7 +75,7 @@ public static class DatasetValidator
     }
 }
 
-/// <summary>Generates seeded synthetic geometric Brownian motion bars without funding or corporate actions.</summary>
+/// <summary>Generates seeded synthetic geometric Brownian motion bars without funding.</summary>
 public static class BrownianGenerator
 {
     /// <summary>Generates count bars using four price steps per bar; equities require enough explicit sessions.</summary>
@@ -124,7 +108,7 @@ public static class BrownianGenerator
                 sessions?.Any(s => s.Open == open) == true, sessions?.Any(s => s.Close == close) == true));
         }
         return new() { Provider = "gbm", Interval = interval, Bars = bars, Sessions = sessions?.ToList() ?? [],
-            Notes = ["Synthetic GBM prices. No corporate actions or funding generated; funding is zero unless supplementary events are imported."] };
+            Notes = ["Synthetic GBM prices. No funding generated; funding is zero unless supplementary events are imported."] };
     }
 }
 
@@ -168,7 +152,6 @@ public sealed class DataCache(string directory)
             {
                 Bars = bars,
                 Sessions = data.Sessions,
-                CorporateActions = data.CorporateActions.Where(a => (start is null || a.Time >= start) && (end is null || a.Time < end)).ToList(),
                 Funding = data.Funding.Where(f => (start is null || f.Time >= start) && (end is null || f.Time < end)).ToList()
             });
         }
@@ -180,7 +163,6 @@ public sealed class DataCache(string directory)
             Interval = interval,
             Bars = datasets.SelectMany(d => d.Bars).Distinct().OrderBy(b => b.OpenTime).ThenBy(b => b.Instrument.Key, StringComparer.Ordinal).ToList(),
             Sessions = datasets.SelectMany(d => d.Sessions).Distinct().OrderBy(s => s.Open).ToList(),
-            CorporateActions = datasets.SelectMany(d => d.CorporateActions).DistinctBy(a => a.Id).OrderBy(a => a.Time).ToList(),
             Funding = datasets.SelectMany(d => d.Funding).DistinctBy(f => (f.Instrument, f.Time)).OrderBy(f => f.Time).ToList(),
             Notes = datasets.SelectMany(d => d.Notes).Distinct().ToList()
         };
@@ -231,6 +213,9 @@ public sealed class DataCache(string directory)
             else ranges.Add(gap);
             previousMissing = true;
         }
+        // Adjustments can rewrite all earlier prices; never append a different adjustment basis to an equity snapshot.
+        if (ranges.Count > 0 && data.Bars.Count > 0 && request.Instrument.AssetClass == AssetClass.Equity)
+            throw new InvalidDataException("Adjusted equity history must be downloaded as one snapshot. Move the existing symbol cache file out of the cache and download the full desired range again.");
         foreach (var gap in ranges)
         {
             if (data.Bars.Count > 0 && data.Provider != provider.Name)
@@ -243,7 +228,6 @@ public sealed class DataCache(string directory)
             data = data with
             {
                 Bars = data.Bars.Concat(fetched.Bars).DistinctBy(b => (b.Instrument, b.OpenTime)).OrderBy(b => b.OpenTime).ToList(),
-                CorporateActions = data.CorporateActions.Concat(fetched.CorporateActions).DistinctBy(a => a.Id).OrderBy(a => a.Time).ToList(),
                 Funding = data.Funding.Concat(fetched.Funding).DistinctBy(f => (f.Instrument, f.Time)).OrderBy(f => f.Time).ToList(),
                 Notes = data.Notes.Concat(fetched.Notes).Distinct().ToList(),
                 Sessions = data.Sessions.Concat(sessions).Concat(fetched.Sessions).Distinct().OrderBy(s => s.Open).ToList()
@@ -256,7 +240,6 @@ public sealed class DataCache(string directory)
         return data with
         {
             Bars = data.Bars.Where(b => b.OpenTime >= request.Start && b.CloseTime <= request.End).ToList(),
-            CorporateActions = data.CorporateActions.Where(a => a.Time >= request.Start && a.Time <= request.End).ToList(),
             Funding = data.Funding.Where(f => f.Time >= request.Start && f.Time <= request.End).ToList()
         };
     }

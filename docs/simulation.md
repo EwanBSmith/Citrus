@@ -2,7 +2,7 @@
 
 ## Event timing
 
-The engine merges instrument event times into one UTC timeline. At each time it accrues net equity borrow since the previous event, marks completed bars and evaluates their limit/closing orders, applies corporate actions, applies funding marks/payments, checks maintenance margin, delivers notifications, exposes completed bars, invokes scheduled callbacks, and finally processes new bar opens and their orders. Opening marks are not visible to a decision on the preceding close. Instruments are sorted by their full keys for deterministic processing.
+The engine merges instrument event times into one UTC timeline. At each time it accrues net equity borrow since the previous event, marks completed bars and evaluates their limit/closing orders, applies funding marks/payments, checks maintenance margin, delivers notifications, exposes completed bars, invokes scheduled callbacks, and finally processes new bar opens and their orders. Opening marks are not visible to a decision on the preceding close. Instruments are sorted by their full keys for deterministic processing.
 
 Market orders submitted on a completed bar can fill at the next bar's open, including when that open has the same timestamp as the previous close. Opening-auction orders require submission strictly before the opening timestamp. Closing-auction orders require submission strictly before the close. A closing-bar callback can therefore never trade at that close. Callback order notifications preserve acceptance, fills, and terminal status ordering. No parallel strategy execution occurs.
 
@@ -28,10 +28,8 @@ Funding events debit positive positions and credit negative positions by quantit
 
 A maintenance breach cancels open orders and flattens the portfolio at observable marks with configured trading costs. Opposing virtual positions cross internally first; residuals close externally. Forced liquidation is guaranteed and does not use probabilistic rejection. It may leave negative cash after a gap. The engine observes opens, closes, and explicit funding marks, not intrabar highs/lows as a sequenced path, and cannot model an exchange's intrabar liquidation or liquidation auctions exactly.
 
-## Corporate actions
+## Adjusted equity prices
 
-Use raw prices. Dividends credit/debit positions at the supplied event timestamp; provider imports use ex-date opening time, a cash-recognition approximation rather than payable-date receivable accounting. Splits multiply quantities, divide average basis and outstanding limits, and update prior marks. Fractional quantities remain supported.
+Equity history uses consistently provider-adjusted open, high, low, and close prices. Execution and valuation retain the OHLC timing rules above. Provider adjustments are reflected in price returns; the engine does not separately credit dividends, rescale holdings or limits, convert merger positions, or retire symbols. Quantities change only through fills. These are adjusted price units, not historical share counts or cash-dividend accounting.
 
-Cash mergers and delistings require explicit per-share settlement, including zero for worthless removals. Stock/cash mergers require a positive conversion ratio and successor prices. The engine books a fair-value exchange using the latest observable successor mark, or an old-price-derived mark when no successor mark has yet been observed; its next market observation updates valuation. Existing successor positions combine through average-cost accounting. This is economic P&L accounting, not a tax basis model.
-
-Symbol changes use a one-for-one conversion. Merger/delisting/symbol-change actions cancel old-symbol orders and retire the old instrument against future orders. Unknown terms fail before execution. Action IDs must be unique, and simultaneous actions execute in ID order; supply timestamp/ID ordering consistent with the intended action sequence. The engine does not infer unprovided mergers, delistings, or survivorship bias.
+Imports must supply adjusted history; Citrus cannot infer the adjustment basis from numeric bars. Corporate-action fields are rejected. Replace raw history with provider-adjusted prices. Keep each symbol's history on one adjustment snapshot: to extend or refresh adjusted equity data, move its existing cache file outside the cache and download the full required range. Provider adjustments do not model merger proceeds, delisting losses, or survivorship bias.

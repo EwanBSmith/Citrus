@@ -56,7 +56,7 @@ public sealed class Ledger(decimal initialCash)
     public IReadOnlyList<InstrumentAttribution> Attribution()
     {
         // ExecutionCost is diagnostic: the fill price already includes its effect on trading profit.
-        var income = Movements.Where(c => c.Kind is "Commission" or "Dividend" or "Funding" or "Borrow")
+        var income = Movements.Where(c => c.Kind is "Commission" or "Funding" or "Borrow")
             .GroupBy(c => (c.Substrategy, c.Instrument)).ToDictionary(g => g.Key, g => g.Sum(c => c.Amount));
         return accounts.Values.SelectMany(a => a.Positions.Values).Select(p =>
         {
@@ -133,41 +133,5 @@ public sealed class Ledger(decimal initialCash)
     {
         foreach (var sub in accounts.Keys)
             Cash(sub, funding.Instrument, funding.Time, "Funding", -Quantity(sub, funding.Instrument) * funding.MarkPrice * funding.Rate);
-    }
-    /// <summary>Applies explicit equity settlement terms, adjusting positions, cash, and marks as appropriate.</summary>
-    public void CorporateAction(CorporateAction action)
-    {
-        foreach (var (sub, account) in accounts)
-        {
-            if (!account.Positions.TryGetValue(action.Instrument, out var p)) continue;
-            switch (action.Type)
-            {
-                case ActionType.Dividend:
-                    Cash(sub, action.Instrument, action.Time, "Dividend", p.Quantity * action.Amount!.Value);
-                    break;
-                case ActionType.Split:
-                    account.Positions[action.Instrument] = p with { Quantity = p.Quantity * action.Ratio!.Value, AveragePrice = p.AveragePrice / action.Ratio.Value };
-                    break;
-                case ActionType.SymbolChange:
-                case ActionType.Merger:
-                case ActionType.Delisting:
-                    var ratio = action.Type == ActionType.SymbolChange ? 1m : action.Ratio ?? 0;
-                    if (p.Quantity == 0) break;
-                    var successorMark = action.Successor is not null && ratio > 0 ? marks.GetValueOrDefault(action.Successor,
-                        Math.Max(0, marks.GetValueOrDefault(action.Instrument, p.AveragePrice) - (action.Amount ?? 0)) / ratio) : 0;
-                    // Book a fair-value exchange, including an already-held or opposing successor position.
-                    Apply(new(0, sub, action.Instrument, action.Time, -p.Quantity, (action.Amount ?? 0) + ratio * successorMark, 0, true));
-                    if (action.Successor is not null && ratio > 0)
-                    {
-                        marks.TryAdd(action.Successor, successorMark);
-                        Apply(new(0, sub, action.Successor, action.Time, p.Quantity * ratio, successorMark, 0, true));
-                    }
-                    Movements.Add(new(sub, action.Instrument, action.Time, action.Type.ToString(), p.Quantity * (action.Amount ?? 0)));
-                    break;
-            }
-        }
-        if (action.Type == ActionType.Split && marks.TryGetValue(action.Instrument, out var mark)) marks[action.Instrument] = mark / action.Ratio!.Value;
-        if (action.Successor is not null && marks.TryGetValue(action.Instrument, out var old))
-            marks.TryAdd(action.Successor, Math.Max(0, old - (action.Amount ?? 0)) / (action.Ratio ?? 1));
     }
 }

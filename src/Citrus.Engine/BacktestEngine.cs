@@ -21,9 +21,6 @@ public sealed class BacktestEngine
         ExecutionMode mode = ExecutionMode.Backtest)
     {
         DatasetValidator.Validate(data);
-        foreach (var action in data.CorporateActions.Where(a => a.Successor is not null))
-            if (!data.Bars.Any(b => b.Instrument == action.Successor && b.CloseTime >= action.Time))
-                throw new InvalidDataException($"Corporate action {action.Id} requires successor price history; merge a supplementary dataset.");
         configuration.Simulation.Validate();
         if (configuration.SchemaVersion != 1 || configuration.InitialCash <= 0)
             throw new ArgumentException("Invalid run configuration.");
@@ -50,10 +47,9 @@ public sealed class BacktestEngine
         var context = new Context(ledger, book, mode, available, data.Sessions, configuration.Simulation.ExecuteMarketOrdersAtCompletedClose, executionCandles);
         var opens = data.Bars.GroupBy(b => b.OpenTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var closes = data.Bars.GroupBy(b => b.CloseTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
-        var actions = data.CorporateActions.GroupBy(a => a.Time).ToDictionary(g => g.Key, g => g.OrderBy(a => a.Id, StringComparer.Ordinal).ToArray());
         var funding = data.Funding.GroupBy(f => f.Time).ToDictionary(g => g.Key, g => g.OrderBy(f => f.Instrument.Key, StringComparer.Ordinal).ToArray());
         var first = opens.Keys.Min(); var last = closes.Keys.Max();
-        var times = new SortedSet<DateTimeOffset>(opens.Keys.Concat(closes.Keys).Concat(actions.Keys).Concat(funding.Keys).Where(t => t >= first && t <= last));
+        var times = new SortedSet<DateTimeOffset>(opens.Keys.Concat(closes.Keys).Concat(funding.Keys).Where(t => t >= first && t <= last));
         context.Time = first.AddTicks(-1);
         var points = new List<EquityPoint>();
         var notificationIndex = 0;
@@ -83,13 +79,12 @@ public sealed class BacktestEngine
                 foreach (var scheduled in context.Scheduled.Keys.Where(t => t <= last)) times.Add(scheduled);
                 var time = times.Min; times.Remove(time); context.Time = time;
                 ledger.ChargeBorrow(time, time - previous, configuration.Simulation.AnnualBorrowRate); previous = time;
-                // Settle closing bars before actions and callbacks; same-time opens run only after decisions.
+                // Settle closing bars before funding and callbacks; same-time opens run only after decisions.
                 if (closes.TryGetValue(time, out var closing))
                 {
                     foreach (var bar in closing) ledger.Mark(bar.Instrument, bar.Close);
                     foreach (var bar in closing) book.Execute(bar, true);
                 }
-                if (actions.TryGetValue(time, out var events)) foreach (var action in events) { ledger.CorporateAction(action); book.ApplyAction(action); }
                 if (funding.TryGetValue(time, out var payments)) foreach (var payment in payments) { ledger.Mark(payment.Instrument, payment.MarkPrice); ledger.Fund(payment); }
                 book.Liquidate(time);
                 Dispatch();

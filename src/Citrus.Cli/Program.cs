@@ -62,7 +62,6 @@ try
                     if (dataset.Interval != supplement.Interval) throw new InvalidDataException("Imported intervals must match.");
                     dataset = dataset with { Bars = dataset.Bars.Concat(supplement.Bars).OrderBy(b => b.OpenTime).ToList(),
                         Sessions = dataset.Sessions.Concat(supplement.Sessions).Distinct().OrderBy(s => s.Open).ToList(),
-                        CorporateActions = dataset.CorporateActions.Concat(supplement.CorporateActions).ToList(),
                         Funding = dataset.Funding.Concat(supplement.Funding).ToList(), Notes = dataset.Notes.Concat(supplement.Notes).ToList() };
                 }
                 break;
