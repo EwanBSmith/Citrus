@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "portfolio": {
+    "totalReturn": 0.501590921638,
+    "maximumDrawdown": 0.0509201684999383005508002305,
+    "annualizedSharpe": 1.469887426866536,
+    "dailyObservations": 1471
+  },
+  "substrategies": {
+    "PaydaySeason": {
+      "totalReturn": 0.4882217724691358024691358025,
+      "maximumDrawdown": 0.0950031484249922213380985497,
+      "annualizedSharpe": 0.8303535726662081,
+      "dailyObservations": 1471
+    },
+    "BondSeason": {
+      "totalReturn": 0.5498388801533742331288343558,
+      "maximumDrawdown": 0.1391821386257562521350020396,
+      "annualizedSharpe": 0.8528562862332917,
+      "dailyObservations": 1471
+    },
+    "EqBondReversion": {
+      "totalReturn": 0.5615816882836315440689198144,
+      "maximumDrawdown": 0.0887062498120288913368918088,
+      "annualizedSharpe": 1.2006676214467233,
+      "dailyObservations": 1471
+    },
+    "RiskPremia": {
+      "totalReturn": 0.4972054153333333333333333333,
+      "maximumDrawdown": 0.157380449022219014308585838,
+      "annualizedSharpe": 0.9509183687629859,
+      "dailyObservations": 1471
+    }
+  },
+  "final": {
+    "time": "2026-09-11T20:00:00+00:00",
+    "cash": 14740.64421638,
+    "equity": 15015.90921638,
+    "grossExposure": 2701.215,
+    "positions": [
+      {
+        "substrategy": "BondSeason",
+        "instrument": {
+          "venue": "US",
+          "assetClass": "Equity",
+          "symbol": "TLT",
+          "key": "US:Equity:TLT"
+        },
+        "quantity": -32,
+        "averagePrice": 80.8488270,
+        "realizedPnl": 1877.14621084
+      },
+      {
+        "substrategy": "EqBondReversion",
+        "instrument": {
+          "venue": "US",
+          "assetClass": "Equity",
+          "symbol": "SCHB",
+          "key": "US:Equity:SCHB"
+        },
+        "quantity": 0,
+        "averagePrice": 0,
+        "realizedPnl": 918.34138724
+      },
+      {
+        "substrategy": "EqBondReversion",
+        "instrument": {
+          "venue": "US",
+          "assetClass": "Equity",
+          "symbol": "TLT",
+          "key": "US:Equity:TLT"
+        },
+        "quantity": 0,
+        "averagePrice": 0,
+        "realizedPnl": 712.54624800000000000000000013
+      },
+      {
+        "substrategy": "PaydaySeason",
+        "instrument": {
+          "venue": "US",
+          "assetClass": "Equity",
+          "symbol": "SCHB",
+          "key": "US:Equity:SCHB"
+        },
+        "quantity": 0,
+        "averagePrice": 0,
+        "realizedPnl": 372.36783570
+      },
+      {
+        "substrategy": "RiskPremia",
+        "instrument": {
+          "venue": "US",
+          "assetClass": "Equity",
+          "symbol": "GLDM",
+          "key": "US:Equity:GLDM"
+        },
+        "quantity": 6.0,
+        "averagePrice": 58.452719507305695414736983752,
+        "realizedPnl": 857.5513600438341724884219025
+      },
+      {
+        "substrategy": "RiskPremia",
+        "instrument": {
+          "venue": "US",
+          "assetClass": "Equity",
+          "symbol": "SCHB",
+          "key": "US:Equity:SCHB"
+        },
+        "quantity": 33,
+        "averagePrice": 24.161346354874235582809112412,
+        "realizedPnl": 472.82294171084977423270070974
+      },
+      {
+        "substrategy": "RiskPremia",
+        "instrument": {
+          "venue": "US",
+          "assetClass": "Equity",
+          "symbol": "TLT",
+          "key": "US:Equity:TLT"
+        },
+        "quantity": 17,
+        "averagePrice": 98.36704433356900452488687782,
+        "realizedPnl": -126.94334832932692307692307692
+      }
+    ]
+  },
+  "annualizationDays": 252
+}

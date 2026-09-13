@@ -376,4 +376,9 @@ public partial class MainWindow : Window
         if (busy) { e.Cancel = true; status.Text = "Wait for the current operation to finish before closing."; return; }
         try { e.Cancel = !ConfirmEdits(); } catch (Exception exception) { e.Cancel = true; ShowError(exception); }
     }
+
+    private void MenuItem_Click(object sender, RoutedEventArgs e)
+    {
+
+    }
 }

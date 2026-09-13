@@ -66,8 +66,8 @@
     <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="260"/><RowDefinition Height="5"/><RowDefinition Height="100" MinHeight="60"/></Grid.RowDefinitions>
     <TabControl x:Name="tabs">
      <TabItem x:Name="strategyPage" Header="Strategy">
-      <DockPanel><TextBlock DockPanel.Dock="Top" Text="C# strategy • Ctrl+Space: complete • Ctrl+Shift+Space: parameters • F6: validate • F5: run" Margin="8" TextWrapping="Wrap"/>
-       <local:StrategyEditor x:Name="strategyEditor"/>
+      <DockPanel>
+                            <local:StrategyEditor x:Name="strategyEditor"/>
       </DockPanel>
      </TabItem>
      <TabItem x:Name="configPage" Header="Configuration">

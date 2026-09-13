@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "configuration": {
+    "schemaVersion": 1,
+    "references": [],
+    "start": "2020-11-01T00:00:00+00:00",
+    "end": "2026-09-12T00:00:00+00:00",
+    "interval": {
+      "name": "1d",
+      "minutes": 1440
+    },
+    "output": "Results/Default",
+    "initialCash": 10000,
+    "seed": 42,
+    "riskFreeRate": 0,
+    "simulation": {
+      "commissionFixed": 0,
+      "commissionPerUnit": 0,
+      "spreadBps": 2,
+      "slippageBps": 1,
+      "rejectionProbability": 0,
+      "equityInitialMargin": 0.5,
+      "equityMaintenanceMargin": 0.25,
+      "perpetualInitialMargin": 0.1,
+      "perpetualMaintenanceMargin": 0.05,
+      "annualBorrowRate": 0,
+      "shortsAvailable": true
+    }
+  },
+  "seed": 42,
+  "engineVersion": "1.0.0.0",
+  "engineHash": "A807993066BB128C5100C5A53E9232A44E2D4E1070F0196649F4BA283F8FC619",
+  "componentHashes": {
+    "Citrus.Engine": "A807993066BB128C5100C5A53E9232A44E2D4E1070F0196649F4BA283F8FC619",
+    "Citrus.Simulation": "B704A9A6491D16B72BC1BA7A6326F24AF3BF9E6154371C8F3DA402286056FE23",
+    "Citrus.Data": "02A656A1B9F47CEEC920CA1A83DD06F853CC98E6C324193DEF148830B5A8BAED",
+    "Citrus.Trading": "08BE0C8DB52EB334D86A115BC250B18381FDF080D93FE8F8788B8F6D34EC66E3",
+    "Microsoft.CodeAnalysis.CSharp": "FC571A6647AC45B0B0DC1866B795529BB2EEB93ADF9BE97FCD5903CF482F700A"
+  },
+  "runtime": ".NET 10.0.12",
+  "strategyHash": "6CC98CD0A938CC63134A56A15C6355340A0E3B067121A9F3198D5A63FA4F9F51",
+  "dataHash": "0ED2F74EDA0AB8D30E340D95869BC349A487C4C5562757B61D1560E7B31E7B65",
+  "dependencyHashes": {},
+  "calendarHash": "070E9E7774F557D46CE46CD7D81A171D18224CC193403892D992E72B9445FA56",
+  "reproducibility": "Repeatability requires unchanged inputs, engine/runtime, and a deterministic trusted strategy. External I/O and script-owned randomness are untracked.",
+  "provider": "alpaca-sip",
+  "notes": [
+    "Regular-session aggregation of raw minute bars; missing trade minutes are not synthesized. Corporate action API filters process dates; verify effective-date coverage with supplementary events."
+  ]
+}
