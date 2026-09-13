@@ -130,6 +130,9 @@ public partial class ConfigurationEditor : UserControl
             node[parts[^1]] = JsonSerializer.SerializeToNode(value);
         }
         var result = root.Deserialize<RunConfiguration>()!;
+        if ((changed.Contains("StrategyProject") || changed.Contains("StrategyAssembly")) &&
+            (!string.IsNullOrWhiteSpace(result.StrategyProject) || !string.IsNullOrWhiteSpace(result.StrategyAssembly)))
+            result = result with { Strategy = null };
         result.Simulation.Validate();
         StrategyFolder.Validate(result);
         if (result.InitialCash <= 0) throw new ArgumentException("Initial cash must be positive.");

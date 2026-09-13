@@ -55,6 +55,28 @@ internal static class ExternalStrategyTests
             File.WriteAllText(Path.Combine(root, "Citrus.Trading.dll"), "incompatible API");
             ExpectFailure(() => CompiledStrategy.LoadAssembly(assembly));
         });
+        test("API compatibility tolerates debug paths but rejects a different recorded Git revision", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "citrus-version-tests-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var assembly = Path.Combine(root, "Simple.dll");
+            Emit(assembly, "public class Simple : Citrus.Trading.IStrategy { public void OnStart(Citrus.Trading.IStrategyContext c) {} public void OnBar(Citrus.Trading.IStrategyContext c, System.Collections.Generic.IReadOnlyList<Citrus.Trading.Bar> b) {} }");
+            var api = typeof(IStrategy).Assembly;
+            var bytes = File.ReadAllBytes(api.Location);
+            var pdb = bytes.AsSpan().IndexOf(System.Text.Encoding.UTF8.GetBytes("Citrus.Trading.pdb"));
+            if (pdb < 0) throw new Exception("Fixture API must contain portable debug metadata.");
+            bytes[pdb] = (byte)'X';
+            var contract = Path.Combine(root, "Citrus.Trading.dll");
+            File.WriteAllBytes(contract, bytes);
+            using var loaded = CompiledStrategy.LoadAssembly(assembly);
+            var version = api.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+                .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion;
+            var position = bytes.AsSpan().IndexOf(System.Text.Encoding.UTF8.GetBytes(version));
+            if (position < 0) throw new Exception("Fixture API must record its build version.");
+            bytes[position] = (byte)'9';
+            File.WriteAllBytes(contract, bytes);
+            ExpectFailure(() => CompiledStrategy.LoadAssembly(assembly));
+        });
     }
 
     /// <summary>Emits a real DLL fixture with optional dependency references.</summary>

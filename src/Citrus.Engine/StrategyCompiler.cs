@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
 using System.Security.Cryptography;
 using Citrus.Trading;
@@ -109,7 +111,7 @@ public sealed class CompiledStrategy : IDisposable
             paths.Add(target);
         }
         var contract = Path.Combine(snapshot, "Citrus.Trading.dll");
-        if (File.Exists(contract) && !File.ReadAllBytes(contract).SequenceEqual(File.ReadAllBytes(typeof(IStrategy).Assembly.Location)))
+        if (File.Exists(contract) && !CompatibleContract(contract))
             throw new InvalidDataException("The strategy was built against a different Citrus.Trading assembly. Rebuild Citrus and the strategy from the same pinned Citrus revision.");
         var input = Path.Combine(snapshot, Path.GetFileName(assemblyPath));
         var context = new StrategyLoadContext(paths, input);
@@ -148,5 +150,34 @@ public sealed class CompiledStrategy : IDisposable
             StrategyAssembly = Path.Combine(relative, Path.GetFileName(InputPath)), StrategyType = Strategy.GetType().FullName,
             StrategySolution = null, References = [], Output = "replay-results" });
         return relative;
+    }
+
+    /// <summary>Accepts identical API artifacts or the same Git-versioned API identity, allowing checkout/debug metadata differences.</summary>
+    private static bool CompatibleContract(string path)
+    {
+        var host = typeof(IStrategy).Assembly;
+        if (File.ReadAllBytes(path).SequenceEqual(File.ReadAllBytes(host.Location))) return true;
+        try
+        {
+            if (AssemblyName.GetAssemblyName(path).FullName != host.GetName().FullName) return false;
+            var version = host.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (version is null || !version.Contains('+')) return false;
+            using var stream = File.OpenRead(path);
+            using var pe = new PEReader(stream);
+            var metadata = pe.GetMetadataReader();
+            foreach (var handle in metadata.GetAssemblyDefinition().GetCustomAttributes())
+            {
+                var attribute = metadata.GetCustomAttribute(handle);
+                if (attribute.Constructor.Kind != HandleKind.MemberReference) continue;
+                var constructor = metadata.GetMemberReference((MemberReferenceHandle)attribute.Constructor);
+                if (constructor.Parent.Kind != HandleKind.TypeReference) continue;
+                var type = metadata.GetTypeReference((TypeReferenceHandle)constructor.Parent);
+                if (metadata.GetString(type.Namespace) != "System.Reflection" || metadata.GetString(type.Name) != nameof(AssemblyInformationalVersionAttribute)) continue;
+                var blob = metadata.GetBlobReader(attribute.Value);
+                return blob.ReadUInt16() == 1 && blob.ReadSerializedString() == version;
+            }
+        }
+        catch (BadImageFormatException) { return false; }
+        return false;
     }
 }
