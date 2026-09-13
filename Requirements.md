@@ -36,7 +36,7 @@ A user deploys the same strategy definition through the command-line interface. 
 
 - **UR-PLAT-001** Citrus shall be implemented using .NET.
 - **UR-PLAT-002** Citrus shall support backtesting and live trading.
-- **UR-PLAT-003** Citrus shall support external C# strategy projects and prebuilt strategy assemblies; existing file-based scripts remain compatible.
+- **UR-PLAT-003** Strategies shall live in the main Citrus repository and solution as a C# class-library project. Citrus shall support project builds and prebuilt strategy assemblies; existing file-based scripts remain compatible.
 - **UR-PLAT-003A** Strategies shall be written in C# against Citrus.Trading.
 - **UR-PLAT-003B** Citrus shall build selected strategy projects in Release before execution, or load explicitly selected prebuilt assemblies.
 - **UR-PLAT-003C** The strategy execution contract shall be independent of the authoring IDE and repository; strategy code shall reference Citrus.Trading.

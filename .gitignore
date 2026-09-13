@@ -27,6 +27,7 @@ coverage*.info
 *.snupkg
 packages/
 artifacts/
+/Results/
 
 # Operating-system files
 .DS_Store

@@ -32,25 +32,40 @@ The embedded source editor and its language-service dependencies have been remov
 
 Run the Windows integration check with `dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke`. It verifies settings, configuration preservation, external source ownership, background execution, result bindings and WPF rendering.
 
-## External strategy development
+## Strategy development
 
-The private [Citrus.Strategies repository](https://github.com/EwanBSmith/Citrus.Strategies) owns the strategy solution, current Zorro portfolio, tests and debug runner. Citrus is pinned under `external/Citrus` as a Git submodule. Clone with `--recurse-submodules` and open `Citrus.Strategies.slnx` in Visual Studio or Rider. Strategy libraries reference `Citrus.Trading`; runners and integration tests can reference `Citrus.Engine`.
+Strategies live in this repository and the main `Citrus.slnx` solution. Edit `src/Citrus.Strategies/ZorroPortfolio.cs` or add another class to that project. Strategy code references `Citrus.Trading`; the debug runner and tests reference `Citrus.Engine`. There is no strategy submodule or separate repository to update.
+
+Open `Citrus.slnx` in Visual Studio or Rider. Set `Citrus.StrategyRunner` as the startup project to debug: no arguments runs the synthetic Demo, and `Default` runs ZorroPortfolio against the configured historical cache. Add new strategy types to the runner factory when you want to debug them directly.
+
+Launch the workbench from the repository root with `dotnet run --project src/Citrus.Desktop -c Release -- .`. Default, Demo and Comparison configurations live in `Backtests/`; they open this same solution through **Open in IDE**. Save source in your IDE, then press F5 in Citrus to build and run. Results go to `Results/<backtest-name>` and are excluded from Git.
+
+```powershell
+# Generate the offline demo cache and run the debug example.
+dotnet run --project src/Citrus.StrategyRunner -c Release
+$env:CITRUS_HISTORICAL_DATA = Join-Path $PWD 'artifacts/demo-cache'
+dotnet run --project src/Citrus.Cli -c Release -- backtest . Demo
+dotnet run --project src/Citrus.Cli -c Release -- replay Results/Demo
+dotnet run --project tests/Citrus.Strategies.Tests -c Release
+```
+
+For ZorroPortfolio, use the configured historical cache (remove the demo environment override if set) and run `backtest . Default`. Commit strategy changes, backtest configurations and any engine changes together in this repository. The previously created standalone strategy repository is superseded; it is not required for this workflow.
 
 A workspace configuration can select a normal single-target .NET 10 class-library project:
 
 ```json
 {
   "schemaVersion": 1,
-  "strategyProject": "src/Strategies/Strategies.csproj",
-  "strategyType": "MyStrategies.Hold",
-  "strategySolution": "MyStrategies.slnx",
+  "strategyProject": "src/Citrus.Strategies/Citrus.Strategies.csproj",
+  "strategyType": "ZorroPortfolio",
+  "strategySolution": "Citrus.slnx",
   "output": "Results/Hold"
 }
 ```
 
 Paths are relative to the workspace containing `Backtests`, or to a standalone configuration's directory. Use `strategyAssembly` instead of `strategyProject` for a prebuilt DLL. Set `strategyType` to the fully qualified name when more than one concrete strategy is present. Each selected type must be public, implement `IStrategy`, and have a public parameterless constructor. Existing `Strategy.cs` folders remain supported.
 
-Project runs invoke `dotnet build -c Release` and use MSBuild's actual `TargetPath`. Enable `EnableDynamicLoading` in the class library, copy required content into its build output, and resolve content relative to the strategy assembly. Managed/native dependencies resolve from the captured output and its `.deps.json`. Use the CLI/desktop built from the same pinned Citrus revision; a different `Citrus.Trading.dll` is rejected with rebuild guidance.
+Project runs invoke `dotnet build -c Release` and use MSBuild's actual `TargetPath`. Enable `EnableDynamicLoading` in the class library, copy required content into its build output, and resolve content relative to the strategy assembly. Managed/native dependencies resolve from the captured output and its `.deps.json`. Use the CLI/desktop built from the same Citrus revision; a different `Citrus.Trading.dll` is rejected with rebuild guidance.
 
 External runs copy the loaded DLLs, PDBs and content into a unique `strategy-artifacts` directory beneath the results. The manifest records hashes and checkout revisions/dirty state (null where unavailable). `run.json` selects the captured assembly. Run `Citrus.Cli replay <results-folder>` to use that assembly and the captured `historical-data.json`, independently of the live market cache. The current engine and runtime still execute the replay; preserve the Citrus revision and runtime too. External I/O and strategy-owned randomness are not made deterministic by this mechanism. Temporary snapshots remain under the OS temp directory while assemblies may still be loaded.
 

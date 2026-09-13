@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "strategyProject": "src/Citrus.Strategies/Citrus.Strategies.csproj",
+  "strategyType": "Citrus.Strategies.DemoHold",
+  "strategySolution": "Citrus.slnx",
+  "output": "Results/Demo",
+  "initialCash": 100000
+}

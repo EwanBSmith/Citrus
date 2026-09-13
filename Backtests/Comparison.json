@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "initialCash": 17000,
+  "output": "Results/Comparison",
+  "simulation": {
+    "annualBorrowRate": 0,
+    "shortsAvailable": true
+  },
+  "strategyProject": "src/Citrus.Strategies/Citrus.Strategies.csproj",
+  "strategyType": "ZorroPortfolio",
+  "strategySolution": "Citrus.slnx",
+  "start": "2020-11-01T00:00:00Z",
+  "end": "2026-09-12T00:00:00Z"
+}

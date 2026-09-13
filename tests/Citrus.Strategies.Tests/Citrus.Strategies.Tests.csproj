@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Citrus.Strategies/Citrus.Strategies.csproj" />
+    <ProjectReference Include="../../src/Citrus.Engine/Citrus.Engine.csproj" />
+  </ItemGroup>
+</Project>
