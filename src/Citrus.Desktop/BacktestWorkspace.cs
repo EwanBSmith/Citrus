@@ -5,42 +5,13 @@ using Citrus.Trading;
 
 namespace Citrus.Desktop;
 
-/// <summary>Retains a completed run and its report location for desktop presentation.</summary>
-internal sealed record WorkspaceResult(BacktestResult Result, Performance Performance, string Output);
-
-/// <summary>Resolves file-based desktop inputs and delegates trading behavior to the existing engine.</summary>
+/// <summary>Parses desktop configuration text and creates offline example workspaces.</summary>
 internal static class BacktestWorkspace
 {
     /// <summary>Parses the same strict JSON configuration format accepted by the CLI.</summary>
     internal static RunConfiguration Parse(string text) =>
         JsonSerializer.Deserialize<RunConfiguration>(text, Json.Options)
         ?? throw new InvalidDataException("The run configuration must be a JSON object.");
-
-    /// <summary>Resolves a configured path relative to its run file, never the application directory.</summary>
-    internal static string Resolve(string configurationPath, string path) =>
-        StrategyFolder.Resolve(configurationPath, path);
-
-    /// <summary>Loads a market dataset, compiles trusted source, executes, and exports a completed backtest.</summary>
-    internal static Task<WorkspaceResult> RunAsync(string configurationPath, RunConfiguration config, string? historicalDataDirectory = null,
-        Action<RunConfiguration, IReadOnlyCollection<string>>? onConfigured = null)
-    {
-        using var compiled = CompiledStrategy.LoadConfiguration(configurationPath, config);
-        config = compiled.EffectiveConfiguration(config);
-        onConfigured?.Invoke(config, compiled.Options.Keys.Select(StrategyConfiguration.Field).ToArray());
-        if (string.IsNullOrWhiteSpace(config.Output))
-            throw new ArgumentException("An output path is required.");
-        var output = Resolve(configurationPath, config.Output);
-        var data = DataCache.Load(historicalDataDirectory ?? GlobalConfiguration.Load().ResolveHistoricalDataDirectory(),
-            config.Interval, config.Start, config.End);
-        Directory.CreateDirectory(output);
-        var dataPath = Path.Combine(output, "historical-data.json");
-        Json.Write(dataPath, data);
-        var result = new BacktestEngine().Run(compiled.Strategy, data, config);
-        Reports.Export(output, result, config, data, compiled.InputPath, dataPath, compiled.DependencyHashes, compiled);
-        var metrics = Reports.Metrics(result.Equity.Select(p => (p.Time, p.Equity)), config.RiskFreeRate,
-            data.Bars.Any(b => b.Instrument.AssetClass == AssetClass.LinearPerpetual) ? 365 : 252);
-        return Task.FromResult(new WorkspaceResult(result, metrics, output));
-    }
 
     /// <summary>Creates an offline example workspace and refreshes its synthetic prices in the main cache.</summary>
     internal static string CreateExample(string parent, string? historicalDataDirectory = null)

@@ -23,9 +23,6 @@ public sealed class BacktestEngine
         configuration = StrategyConfiguration.Resolve(strategy, configuration);
         data = StrategyConfiguration.SelectData(strategy, data, configuration);
         DatasetValidator.Validate(data);
-        configuration.Simulation.Validate();
-        if (configuration.SchemaVersion != 1 || configuration.InitialCash <= 0)
-            throw new ArgumentException("Invalid run configuration.");
         foreach (var group in data.Bars.GroupBy(b => b.Instrument))
             DatasetValidator.RequireCoverage(data, group.Key, group.Min(b => b.OpenTime), group.Max(b => b.CloseTime));
         var available = data.Bars.Select(b => b.Instrument).ToHashSet();

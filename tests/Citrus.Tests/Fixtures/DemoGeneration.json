@@ -1,0 +1,10 @@
+{
+  "instrument": { "venue": "fixture", "assetClass": "LinearPerpetual", "symbol": "BTC" },
+  "interval": { "name": "1d", "minutes": 1440 },
+  "start": "2024-01-01T00:00:00Z",
+  "count": 365,
+  "seed": 42,
+  "initialPrice": 40000,
+  "annualDrift": 0.05,
+  "annualVolatility": 0.2
+}

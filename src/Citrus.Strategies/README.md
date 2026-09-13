@@ -37,8 +37,8 @@ The former $38,381.34 parity figure used a different March 2010–September 2026 Z
 
 ## Running
 
-Run `backtest examples/ZorroPortfolio Comparison` for the fixed comparison dates, or `backtest examples/ZorroPortfolio` for the available history. Both use native Citrus fills. The comparison's `Results/Comparison` directory is overwritten on reruns.
+From the repository root, run `backtest . Comparison` for the fixed comparison dates, or `backtest . Default` for the available history. Both build the strategy in `Citrus.Strategies` and use native Citrus fills. The comparison's `Results/Comparison` directory is overwritten on reruns.
 
 Use adjusted daily histories for SCHB, GLDM, TLT, UGA, UVXY, VXZ, SVXY and VIXY in the main historical cache. The missing ETFs were downloaded and installed there for this comparison; BOIL is also available for the separate seasonality example. The strategy loads VIX and VIX3M from its adjacent `Data` directory. Keep index and ETF coverage aligned when extending the analysis.
 
-The regression suite compiles this strategy and checks auction timing, preceding-close sizing, next-open signals, reversals, repeatability and unchanged pre-close decisions after an unseen close is altered.
+The regression suite references `Citrus.Strategies` directly and checks this strategy's auction timing, preceding-close sizing, next-open signals, reversals, repeatability and unchanged pre-close decisions after an unseen close is altered.

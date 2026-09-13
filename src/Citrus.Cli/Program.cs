@@ -16,7 +16,7 @@ try
           data generate <generation.json> <output.json>
           data import <dataset.json> <output.json> [supplement.json ...]
           data download <download.json> <output.json>
-        See README.md and examples for configuration and simulation assumptions.
+        See README.md for configuration examples and simulation assumptions.
         """);
         return 0;
     }
@@ -31,22 +31,9 @@ try
     }
     if (args[0] == "backtest" && args.Length is 2 or 3 || args[0] == "replay" && args.Length == 2)
     {
-        var replay = args[0] == "replay";
-        var configPath = replay ? Path.GetFullPath(Path.Combine(args[1], "run.json")) : StrategyFolder.ConfigurationPath(args[1], args.Length == 3 ? args[2] : null);
-        // Return an absolute path using the configuration directory as the base for relative paths.
-        string Resolve(string path) => StrategyFolder.Resolve(configPath, path);
-        var config = StrategyFolder.Read(configPath);
-        using var compiled = CompiledStrategy.LoadConfiguration(configPath, config);
-        config = compiled.EffectiveConfiguration(config);
-        var output = Resolve(config.Output);
-        var data = replay ? Json.Read<MarketDataset>(Path.Combine(Path.GetDirectoryName(configPath)!, "historical-data.json"))
-            : DataCache.Load(GlobalConfiguration.Load().ResolveHistoricalDataDirectory(), config.Interval, config.Start, config.End);
-        Directory.CreateDirectory(output);
-        var dataPath = Path.Combine(output, "historical-data.json");
-        Json.Write(dataPath, data);
-        var result = new BacktestEngine().Run(compiled.Strategy, data, config);
-        Reports.Export(output, result, config, data, compiled.InputPath, dataPath, compiled.DependencyHashes, compiled);
-        Console.WriteLine($"Completed: {result.Fills.Count} attributed fills; final equity {result.Final.Equity.ToString("F2", CultureInfo.InvariantCulture)}. Results: {output}"); return 0;
+        var completed = args[0] == "replay" ? BacktestRunner.Replay(args[1])
+            : BacktestRunner.Run(StrategyFolder.ConfigurationPath(args[1], args.Length == 3 ? args[2] : null));
+        Console.WriteLine($"Completed: {completed.Result.Fills.Count} attributed fills; final equity {completed.Result.Final.Equity.ToString("F2", CultureInfo.InvariantCulture)}. Results: {completed.Output}"); return 0;
     }
     if (args.Length >= 4 && args[0] == "data")
     {

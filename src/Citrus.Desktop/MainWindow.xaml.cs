@@ -1,6 +1,5 @@
 using System.Data;
 using System.Diagnostics;
-using System.Text.Json;
 using Citrus.Engine;
 
 namespace Citrus.Desktop;
@@ -324,7 +323,7 @@ public partial class MainWindow : Window
             ClearResults();
             SetBusy(true, "Running backtest — preparing data, compiling, simulating and exporting...");
             var watch = Stopwatch.StartNew();
-            var completed = await Task.Run(() => BacktestWorkspace.RunAsync(path, config, historicalDataDirectory,
+            var completed = await Task.Run(() => BacktestRunner.Run(path, config, historicalDataDirectory,
                 (effective, fields) => Dispatcher.Invoke(() => configEditor.LoadConfiguration(effective, fields))));
             Present(completed);
             status.Text = $"Completed in {watch.Elapsed.TotalSeconds:N1}s — {completed.Output}";
@@ -335,7 +334,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Shows portfolio performance, equity, and flattened sortable execution/accounting records.</summary>
-    internal void Present(WorkspaceResult completed)
+    internal void Present(CompletedBacktest completed)
     {
         outputPath = completed.Output;
         var r = completed.Result; var p = completed.Performance;
@@ -347,41 +346,12 @@ public partial class MainWindow : Window
         tabs.SelectedIndex = 2;
     }
 
-    /// <summary>Flattens nested record properties into typed columns, limiting UI rows while preserving full exports.</summary>
+    /// <summary>Binds a result table and releases the previous table's storage.</summary>
     private void Bind<T>(string name, IEnumerable<T> records)
     {
-        var rows = records.Take(5000).Select(record =>
-        {
-            var values = new Dictionary<string, object>();
-            Flatten(JsonSerializer.SerializeToElement(record, Citrus.Data.Json.Options), "", values);
-            return values;
-        }).ToArray();
-        var table = new DataTable();
-        foreach (var key in rows.SelectMany(r => r.Keys).Distinct())
-        {
-            var value = rows.Select(r => r.GetValueOrDefault(key)).FirstOrDefault(v => v is not null && v != DBNull.Value);
-            table.Columns.Add(key, value?.GetType() ?? typeof(string));
-        }
-        foreach (var row in rows) table.Rows.Add(table.Columns.Cast<DataColumn>().Select(c => row.GetValueOrDefault(c.ColumnName, DBNull.Value)).ToArray());
+        var table = ResultTable.Create(records);
         var previous = (grids[name].ItemsSource as DataView)?.Table;
         grids[name].ItemsSource = table.DefaultView; previous?.Dispose();
-    }
-
-    /// <summary>Expands objects such as instruments and substrategy dictionaries into named scalar columns.</summary>
-    private static void Flatten(JsonElement element, string prefix, Dictionary<string, object> row)
-    {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var property in element.EnumerateObject()) Flatten(property.Value, prefix.Length == 0 ? property.Name : prefix + "." + property.Name, row);
-            return;
-        }
-        row[prefix] = element.ValueKind switch
-        {
-            JsonValueKind.Number when element.TryGetDecimal(out var number) => number,
-            JsonValueKind.True => true, JsonValueKind.False => false,
-            JsonValueKind.Null => DBNull.Value,
-            _ => element.ToString()
-        };
     }
 
     /// <summary>Clears prior-run results so failures cannot be mistaken for a successful new run.</summary>
@@ -436,10 +406,5 @@ public partial class MainWindow : Window
     {
         if (busy) { e.Cancel = true; status.Text = "Wait for the current operation to finish before closing."; return; }
         try { e.Cancel = !ConfirmEdits(); } catch (Exception exception) { e.Cancel = true; ShowError(exception); }
-    }
-
-    private void MenuItem_Click(object sender, RoutedEventArgs e)
-    {
-
     }
 }

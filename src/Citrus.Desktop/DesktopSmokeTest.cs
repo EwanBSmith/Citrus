@@ -80,19 +80,19 @@ internal static class DesktopSmokeTest
             var exampleHistory = Json.Read<MarketDataset>(exampleHistoryPath);
             Json.Write(exampleHistoryPath, exampleHistory with { Bars = exampleHistory.Bars.Select(b =>
                 b with { Instrument = b.Instrument with { Venue = "different-data-source" } }).ToList() });
-            var first = BacktestWorkspace.RunAsync(path, config, exampleLibrary).GetAwaiter().GetResult();
+            var first = BacktestRunner.Run(path, config, exampleLibrary);
             Require(first.Result.Fills.Single().Instrument.Venue == "different-data-source", "Symbol binding must retain source metadata without requiring the strategy to name its venue.");
             if (first.Result.Fills.Count != 1 || first.Result.Equity.Count < 365)
                 throw new InvalidOperationException("Example did not execute the expected holding strategy.");
             var equityPath = Path.Combine(first.Output, "equity.csv");
             var before = File.ReadAllText(equityPath);
             File.WriteAllText(Path.Combine(first.Output, "retain.txt"), "Keep unrelated output files");
-            BacktestWorkspace.RunAsync(path, config, exampleLibrary).GetAwaiter().GetResult();
+            BacktestRunner.Run(path, config, exampleLibrary);
             if (before != File.ReadAllText(equityPath) || !File.Exists(Path.Combine(first.Output, "retain.txt")))
                 throw new InvalidOperationException("Replay or output preservation failed.");
             ExpectFailure(() => BacktestWorkspace.Parse("{\"unknownSetting\":1}"));
-            ExpectFailure(() => BacktestWorkspace.RunAsync(path, config, Path.Combine(directory, "missing-cache")).GetAwaiter().GetResult());
-            ExpectFailure(() => BacktestWorkspace.RunAsync(path, config with { Start = DateTimeOffset.Parse("2025-01-02T00:00:00Z"), End = DateTimeOffset.Parse("2025-01-01T00:00:00Z") }, library).GetAwaiter().GetResult());
+            ExpectFailure(() => BacktestRunner.Run(path, config, Path.Combine(directory, "missing-cache")));
+            ExpectFailure(() => BacktestRunner.Run(path, config with { Start = DateTimeOffset.Parse("2025-01-02T00:00:00Z"), End = DateTimeOffset.Parse("2025-01-01T00:00:00Z") }, library));
 
             var window = new MainWindow(null, exampleLibrary);
             ShowHidden(window); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);

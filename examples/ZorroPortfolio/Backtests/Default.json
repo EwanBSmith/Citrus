@@ -1,9 +1,0 @@
-{
-  "schemaVersion": 1,
-  "initialCash": 17000,
-  "output": "Results/Default",
-  "simulation": {
-    "annualBorrowRate": 0,
-    "shortsAvailable": true
-  }
-}

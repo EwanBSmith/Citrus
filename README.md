@@ -113,16 +113,15 @@ Alpaca downloads read saved credentials on each invocation. Nonempty `APCA_API_K
 ```sh
 # Point automated/example runs at an isolated main cache (PowerShell: $env:CITRUS_HISTORICAL_DATA="artifacts/cache")
 export CITRUS_HISTORICAL_DATA="artifacts/cache"
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/PerpetualTrend/GenerateData.json artifacts/cache/perpetual-data.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- validate examples/PerpetualTrend/Strategy.cs
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/PerpetualTrend
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate examples/EquityHold/GenerateData.json artifacts/cache/equity-data.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest examples/EquityHold
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate tests/Citrus.Tests/Fixtures/DemoGeneration.json artifacts/cache/demo-data.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- validate Backtests/Demo.json
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest . Demo
+dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- replay Results/Demo
 ```
 
 Rerunning a backtest overwrites its result files in the configured output directory. Data commands also overwrite their output file, so the example commands can be rerun as written. Other files in the result directory are retained. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
 
-The perpetual example has a trend substrategy and a holding substrategy with 70/30 capital allocation. The equity example demonstrates next-session opening orders across a weekend and the US daylight-saving transition. Generated prices have zero funding unless supplementary funding events are added.
+The Demo backtest runs `Citrus.Strategies.DemoHold` against seeded synthetic BTC prices and captures the built strategy for replay. Generated prices have zero funding unless supplementary funding events are added. The regression suite separately checks equity session timing, weekends and daylight-saving transitions.
 
 ## Concise strategy API
 
@@ -257,7 +256,7 @@ Read [simulation rules](docs/simulation.md) and [requirement traceability](docs/
 - **Citrus.Trading** contains instruments, market data events, orders, portfolio records, and the strategy API. Its folders are Instruments, MarketData, Orders, Portfolio, and Strategies; all public types share the `Citrus.Trading` namespace so strategies need one import. This assembly has no dependency on storage, Roslyn, or simulation.
 - **Citrus.Data** owns datasets, providers, validation, caching, and JSON persistence.
 - **Citrus.Simulation** owns order execution, portfolio accounting, and `SimulationOptions`.
-- **Citrus.Engine** owns `RunConfiguration`, strategy compilation, backtest coordination, and reports.
+- **Citrus.Engine** owns `RunConfiguration`, strategy compilation, backtest coordination, and reports. `BacktestRunner.Run` shares strategy loading, effective configuration, cache selection, execution and export between the CLI and desktop. `BacktestRunner.Replay` uses the same workflow with captured history. Both return a `CompletedBacktest` containing results, portfolio metrics and the absolute output directory; the desktop dispatches this synchronous work to a background thread.
 - **Citrus.Cli** handles commands and paths; **Citrus.Tests** verifies behaviour.
 
 When updating an existing strategy, replace `using Citrus.Contracts;` with `using Citrus.Trading;`. External projects must update their project/assembly reference to `Citrus.Trading` and rebuild. Consumers of `MarketDataset` or `Json` now import `Citrus.Data`, consumers of `SimulationOptions` import `Citrus.Simulation`, and consumers of `RunConfiguration` import `Citrus.Engine`. Equity datasets require adjusted prices and omit corporate actions. Previously captured strategy sources also need the import updated before recompilation; existing manifests retain their original hashes.
@@ -272,7 +271,7 @@ dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore -- --
 
 The benchmark uses 100 symbols, 20 substrategies, SMA calculations, and 2,000 initial orders. It measures engine execution, excluding data generation. Initial Windows/.NET 10 measurements: 365,000 daily bars in 15.978 seconds (205 MiB process peak), and 1,752,000 hourly bars in 70.822 seconds (764 MiB process peak). Memory is the process high-water mark, including dataset generation; these are observations, not hardware-independent limits.
 
-GitHub Actions is configured to build, run offline tests, and execute both examples on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.
+GitHub Actions is configured to build, run offline tests, and generate data, validate, execute and replay the Demo backtest on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.
 
 ## Strategy folders
 

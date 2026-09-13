@@ -11,6 +11,7 @@ using Citrus.Simulation;
 var tests = new List<(string Name, Action Test)>();
 ExternalStrategyTests.Register((name, action) => tests.Add((name, action)));
 StrategyConfigurationTests.Register((name, action) => tests.Add((name, action)));
+BacktestRunnerTests.Register((name, action) => tests.Add((name, action)));
 var instrument = new Instrument("test", AssetClass.LinearPerpetual, "BTC");
 var start = DateTimeOffset.Parse("2024-01-01T00:00:00Z");
 // Build hourly perpetual bars with the supplied open/close prices and a fixed intrabar price range.
@@ -681,9 +682,9 @@ MarketDataset ZorroData()
 }
 Test("Source portfolio uses pre-close calendar auctions and next-open price signals", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "ZorroPortfolio.cs"));
+    var strategy = new ZorroPortfolio();
     var data = ZorroData(); var config = Config() with { InitialCash = 17000 };
-    var result = new BacktestEngine().Run(compiled.Strategy, data, config);
+    var result = new BacktestEngine().Run(strategy, data, config);
     Equal(9, result.Equity.First().Substrategies.Count);
     var gold = result.Fills.Where(f => f.Substrategy == "GoldSeason").ToArray();
     True(gold.Length > 0);
@@ -714,18 +715,18 @@ Test("Source portfolio uses pre-close calendar auctions and next-open price sign
     // A month-end long-to-short reversal is one net sale, and the final Thursday entry remains marked open.
     True(result.Fills.Any(f => f.Substrategy == "BondSeason" && f.Quantity < -30));
     True(result.Final.Positions.Any(p => p.Substrategy == "GoldSeason" && p.Quantity > 0));
-    var repeated = new BacktestEngine().Run(compiled.Strategy, data, config);
+    var repeated = new BacktestEngine().Run(strategy, data, config);
     True(result.Fills.SequenceEqual(repeated.Fills));
 });
 Test("Source portfolio decisions do not depend on unobserved closing prices", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "ZorroPortfolio.cs"));
+    var strategy = new ZorroPortfolio();
     var data = ZorroData(); var config = Config() with { InitialCash = 17000 };
     var last = data.Sessions[^1].Close;
     var changed = data with { Bars = data.Bars.Select(b => b.CloseTime == last
         ? b with { High = b.High + 20, Close = b.Close + 20 } : b).ToList() };
-    var before = new BacktestEngine().Run(compiled.Strategy, data, config);
-    var after = new BacktestEngine().Run(compiled.Strategy, changed, config);
+    var before = new BacktestEngine().Run(strategy, data, config);
+    var after = new BacktestEngine().Run(strategy, changed, config);
     True(before.Orders.Where(o => o.Time < last).SequenceEqual(after.Orders.Where(o => o.Time < last)));
     True(before.Fills.Where(f => f.Time < last).SequenceEqual(after.Fills.Where(f => f.Time < last)));
     Equal(before.Fills.Single(f => f.Substrategy == "GoldSeason" && f.Time == last).Quantity,
