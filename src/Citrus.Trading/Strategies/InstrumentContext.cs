@@ -23,9 +23,14 @@ public sealed class InstrumentContext
         ArgumentException.ThrowIfNullOrWhiteSpace(substrategy);
         Context = context;
         Substrategy = substrategy;
-        Instrument = instrument;
+        Instrument = context.ResolveInstrument(instrument.Symbol);
+        if (Instrument.AssetClass != instrument.AssetClass) throw new ArgumentException($"Asset class does not match history for {instrument.Symbol}.");
         calendar = new Lazy<TradingDay[]>(() => BuildCalendar(exchangeZone ?? TimeZoneInfo.FindSystemTimeZoneById("America/New_York")));
     }
+
+    /// <summary>Binds a symbol directly; venue and asset-class metadata come from the historical dataset.</summary>
+    public InstrumentContext(IStrategyContext context, string substrategy, string symbol, TimeZoneInfo? exchangeZone = null)
+        : this(context, substrategy, context.ResolveInstrument(symbol), exchangeZone) { }
 
     /// <summary>Returns the latest opened session shifted by signed trading sessions (1 is next); null outside coverage or before the first open. Requires complete calendar months.</summary>
     public TradingDay? TradingDay(int offset = 0)

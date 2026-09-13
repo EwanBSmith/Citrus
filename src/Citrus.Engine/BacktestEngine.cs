@@ -32,7 +32,22 @@ public sealed class BacktestEngine
         var available = data.Bars.Select(b => b.Instrument).ToHashSet();
         var ledger = new Ledger(configuration.InitialCash);
         var book = new OrderBook(ledger, configuration.Simulation, configuration.Seed);
-        var context = new Context(ledger, book, mode, available, data.Sessions);
+        var executionCandles = new Dictionary<Bar, (Bar Next, Bar Following)>();
+        if (configuration.Simulation.ZorroDailySlippageSeconds > 0)
+        {
+            if (data.Interval.Minutes != 1440) throw new ArgumentException("Zorro daily slippage requires daily bars.");
+            foreach (var group in data.Bars.GroupBy(b => b.Instrument))
+            {
+                var ordered = group.OrderBy(b => b.CloseTime).ToArray();
+                // Zorro's two-record prefetch leaves the last valid extrapolation cached for the final two callbacks.
+                for (var i = 0; i < ordered.Length && ordered.Length >= 3; i++)
+                {
+                    var next = Math.Min(i + 1, ordered.Length - 2);
+                    executionCandles.Add(ordered[i], (ordered[next], ordered[next + 1]));
+                }
+            }
+        }
+        var context = new Context(ledger, book, mode, available, data.Sessions, configuration.Simulation.ExecuteMarketOrdersAtCompletedClose, executionCandles);
         var opens = data.Bars.GroupBy(b => b.OpenTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var closes = data.Bars.GroupBy(b => b.CloseTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var actions = data.CorporateActions.GroupBy(a => a.Time).ToDictionary(g => g.Key, g => g.OrderBy(a => a.Id, StringComparer.Ordinal).ToArray());
@@ -108,9 +123,10 @@ public sealed class BacktestEngine
     }
 
     /// <summary>Implements strategy operations against the ledger and order book while retaining completed history.</summary>
-    private sealed class Context(Ledger ledger, OrderBook book, ExecutionMode mode, HashSet<Instrument> available, IReadOnlyList<MarketSession> sessions) : IStrategyContext
+    private sealed class Context(Ledger ledger, OrderBook book, ExecutionMode mode, HashSet<Instrument> available, IReadOnlyList<MarketSession> sessions, bool completedCloseExecution, IReadOnlyDictionary<Bar, (Bar Next, Bar Following)> executionCandles) : IStrategyContext
     {
         private readonly Dictionary<Instrument, List<Bar>> history = [];
+        private readonly Dictionary<string, Instrument> symbols = available.ToDictionary(i => i.Symbol, StringComparer.OrdinalIgnoreCase);
         public readonly SortedDictionary<DateTimeOffset, List<string>> Scheduled = [];
         private readonly Dictionary<string, byte[]> externalData = [];
         public bool Started;
@@ -128,10 +144,25 @@ public sealed class BacktestEngine
             if (ledger.Count >= MaximumSubstrategies) throw new InvalidOperationException("A strategy may register at most 100 substrategies.");
             ledger.Register(substrategy, capitalWeight);
         }
+        /// <summary>Resolves only instrument metadata, never future prices, using the symbol as the lookup key.</summary>
+        public Instrument ResolveInstrument(string symbol)
+        {
+            if (string.IsNullOrWhiteSpace(symbol) || !symbols.TryGetValue(symbol, out var instrument))
+                throw new ArgumentException($"No historical data for symbol '{symbol}'. Import its history or select a range that includes it.");
+            return instrument;
+        }
+        /// <summary>Resolves legacy venue-qualified requests while retaining asset-class safety.</summary>
+        private Instrument Resolve(Instrument instrument)
+        {
+            var resolved = ResolveInstrument(instrument.Symbol);
+            if (resolved.AssetClass != instrument.AssetClass) throw new ArgumentException($"Asset class does not match history for {instrument.Symbol}.");
+            return resolved;
+        }
         /// <summary>Returns a copy of up to count completed bars for an instrument, rejecting negative counts.</summary>
         public IReadOnlyList<Bar> History(Instrument instrument, int count)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(count);
+            instrument = Resolve(instrument);
             return history.TryGetValue(instrument, out var values) ? values.TakeLast(count).ToArray() : [];
         }
         /// <summary>Appends a completed bar to the history exposed to strategy callbacks.</summary>
@@ -144,15 +175,21 @@ public sealed class BacktestEngine
         public long Submit(OrderRequest order)
         {
             if (Stopping) throw new InvalidOperationException("Run is stopping.");
-            if (!available.Contains(order.Instrument))
-                throw new ArgumentException($"Instrument {order.Instrument.Key} has no bars in the market dataset.");
-            return book.Submit(order, Time);
+            order = order with { Instrument = Resolve(order.Instrument) };
+            var id = book.Submit(order, Time);
+            if (completedCloseExecution && order.Type == OrderType.Market && history.TryGetValue(order.Instrument, out var bars) && bars[^1].CloseTime == Time)
+            {
+                var candles = executionCandles.GetValueOrDefault(bars[^1]);
+                book.ExecuteCompletedClose(id, bars[^1], candles.Next, candles.Following);
+            }
+            return id;
         }
         /// <summary>Cancels a pending order at the current simulation time and reports whether it was found.</summary>
         public bool Cancel(long orderId) => book.Cancel(orderId, Time);
         /// <summary>Submits market deltas toward a complete target portfolio using completed prices and accounting for pending units.</summary>
         public void Rebalance(string substrategy, IReadOnlyDictionary<Instrument, decimal> weights)
         {
+            weights = weights.ToDictionary(p => Resolve(p.Key), p => p.Value);
             var equity = ledger.SubstrategyEquity(substrategy);
             var instruments = weights.Keys.Concat(Portfolio.Positions.Where(p => p.Substrategy == substrategy).Select(p => p.Instrument))
                 .Concat(book.Pending.Where(o => o.Request.Substrategy == substrategy).Select(o => o.Request.Instrument)).Distinct().OrderBy(i => i.Key, StringComparer.Ordinal);

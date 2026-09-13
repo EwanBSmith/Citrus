@@ -53,17 +53,21 @@ internal static class BacktestWorkspace
             /// <summary>Buys one unit of the example instrument after the first completed bar.</summary>
             public sealed class ExampleStrategy : IStrategy
             {
-                private static readonly Instrument Instrument = new("citrus-example", AssetClass.LinearPerpetual, "BTC");
+                private InstrumentContext market = null!;
 
                 /// <summary>Allocates starting capital to the holding strategy.</summary>
-                public void OnStart(IStrategyContext context) => context.Register("hold", 1m);
+                public void OnStart(IStrategyContext context)
+                {
+                    context.Register("hold", 1m);
+                    market = new InstrumentContext(context, "hold", "BTC");
+                }
 
                 /// <summary>Places a single quantity-based order using completed history.</summary>
                 public void OnBar(IStrategyContext context, IReadOnlyList<Bar> bars)
                 {
                     foreach (var bar in bars)
-                        if (bar.Instrument == Instrument && context.History(Instrument, 2).Count == 1)
-                            context.Buy("hold", Instrument, 1m);
+                        if (bar.Instrument == market.Instrument && context.History("BTC", 2).Count == 1)
+                            market.Buy(1m);
                 }
             }
             """);

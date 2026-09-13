@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Citrus.Trading;
 
 namespace Citrus.Data;
@@ -12,6 +10,9 @@ public static class DatasetValidator
     {
         if (data.SchemaVersion != 1 || data.Interval.Minutes <= 0 || data.Bars.Count == 0)
             throw new InvalidDataException("Dataset requires schemaVersion 1, a positive interval, and bars.");
+        foreach (var symbol in data.Bars.Select(b => b.Instrument).Distinct().GroupBy(i => i.Symbol, StringComparer.OrdinalIgnoreCase))
+            if (symbol.Count() > 1)
+                throw new InvalidDataException($"Conflicting historical datasets for symbol '{symbol.Key}'. Keep one instrument definition per symbol and interval; provider and venue are metadata, not separate history keys.");
         DateTimeOffset? sessionClose = null;
         foreach (var session in data.Sessions)
         {
@@ -132,7 +133,7 @@ public sealed record DataRequest(Instrument Instrument, BarInterval Interval, Da
 /// <summary>Supplies normalized historical market data for an explicit instrument and coverage request.</summary>
 public interface IMarketDataProvider
 {
-    /// <summary>Gets the provider identity, including feed where applicable, used in cache keys.</summary>
+    /// <summary>Gets the source identity, including feed where applicable, retained as provenance metadata.</summary>
     string Name { get; }
     /// <summary>Fetches normalized data for the requested range with cooperative cancellation.</summary>
     Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default);
@@ -196,22 +197,26 @@ public sealed class DataCache(string directory)
         if (request.Start >= request.End || request.Start.Offset != TimeSpan.Zero || request.End.Offset != TimeSpan.Zero || request.Interval.Minutes <= 0)
             throw new ArgumentException("Coverage must be a nonempty UTC range.");
         Directory.CreateDirectory(directory);
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{provider.Name}|{request.Instrument.Key}|{request.Interval}")));
-        var path = Path.Combine(directory, key + ".json");
-        // Reuse old hashed entries by identity; their obsolete revision metadata is ignored when read.
-        if (!File.Exists(path))
+        var path = Path.Combine(directory, $"symbol-{Uri.EscapeDataString(request.Instrument.Symbol.ToUpperInvariant())}-{request.Interval.Minutes}.json");
+        // Discover legacy hashed files as well as readable symbol files without renaming user data.
         {
             var matches = Directory.EnumerateFiles(directory, "*.json").Where(candidate =>
             {
                 var entry = Json.Read<MarketDataset>(candidate);
-                return entry.Provider == provider.Name && entry.Interval == request.Interval && entry.Bars.Count > 0 &&
-                    entry.Bars.All(b => b.Instrument == request.Instrument);
+                return entry.Interval == request.Interval && entry.Bars.Any(b => string.Equals(b.Instrument.Symbol, request.Instrument.Symbol, StringComparison.OrdinalIgnoreCase));
             }).ToArray();
-            if (matches.Length > 1) throw new InvalidDataException("Multiple cache files contain this provider/instrument/interval. Consolidate them before downloading more history.");
+            if (matches.Length > 1) throw new InvalidDataException($"Multiple cache files contain symbol '{request.Instrument.Symbol}' at {request.Interval.Name}. Consolidate them before downloading more history.");
             if (matches.Length == 1) path = matches[0];
         }
         var data = File.Exists(path) ? Json.Read<MarketDataset>(path) : new MarketDataset { Provider = provider.Name, Interval = request.Interval, Sessions = sessions.ToList() };
         if (data.Bars.Count > 0) DatasetValidator.Validate(data);
+        if (data.Bars.Count > 0)
+        {
+            var stored = data.Bars[0].Instrument;
+            if (!string.Equals(stored.Symbol, request.Instrument.Symbol, StringComparison.OrdinalIgnoreCase) || stored.AssetClass != request.Instrument.AssetClass)
+                throw new InvalidDataException("Cached symbol or asset class does not match the request.");
+            request = request with { Instrument = stored };
+        }
         if (data.Interval != request.Interval || data.Bars.Any(b => b.Instrument != request.Instrument))
             throw new InvalidDataException("Cached instrument or interval does not match the request.");
         var expected = DatasetValidator.Expected(request.Instrument, request.Interval, request.Start, request.End, sessions);
@@ -228,6 +233,8 @@ public sealed class DataCache(string directory)
         }
         foreach (var gap in ranges)
         {
+            if (data.Bars.Count > 0 && data.Provider != provider.Name)
+                throw new InvalidDataException($"History for {request.Instrument.Symbol} already uses {data.Provider}. Use that source to extend it or explicitly replace the existing history; sources are not silently mixed.");
             var fetched = await provider.FetchAsync(request with { Start = gap.Open, End = gap.Close }, cancellationToken);
             DatasetValidator.RequireCoverage(fetched with { Provider = provider.Name, Sessions = sessions.ToList() }, request.Instrument, gap.Open, gap.Close);
             DatasetValidator.Validate(fetched);

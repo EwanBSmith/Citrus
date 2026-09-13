@@ -8,7 +8,7 @@
     "minutes": 1440
   },
   "output": "Results/Default",
-  "initialCash": 10000,
+  "initialCash": 17000,
   "seed": 42,
   "riskFreeRate": 0,
   "simulation": {

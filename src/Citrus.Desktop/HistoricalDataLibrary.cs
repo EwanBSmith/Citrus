@@ -19,7 +19,7 @@ internal static class HistoricalDataLibrary
             {
                 var data = Json.Read<MarketDataset>(path);
                 DatasetValidator.Validate(data);
-                return new HistoricalDataEntry(path, data.Provider, string.Join(", ", data.Bars.Select(b => b.Instrument.Key).Distinct()),
+                return new HistoricalDataEntry(path, data.Provider, string.Join(", ", data.Bars.Select(b => b.Instrument.Symbol).Distinct()),
                     data.Interval.Name, data.Bars.Min(b => b.OpenTime).UtcDateTime, data.Bars.Max(b => b.CloseTime).UtcDateTime,
                     data.Bars.Count, new FileInfo(path).Length, "Valid", string.Join(Environment.NewLine, data.Notes));
             }

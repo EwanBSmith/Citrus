@@ -59,6 +59,7 @@ internal static class DesktopSmokeTest
             File.WriteAllText(Path.Combine(library, "broken.json"), "{broken");
             Json.Write(Path.Combine(library, "empty.json"), new MarketDataset());
             var entries = HistoricalDataLibrary.Scan(library);
+            Require(entries.Single(e => e.Status == "Valid").Instruments == "BTC", "History should be displayed by symbol, not venue.");
             if (entries.Count != 3 || entries.Count(e => e.Status == "Valid") != 1 || entries.Single(e => e.Status == "Valid").Bars != 24)
                 throw new InvalidOperationException("Library scanning did not isolate invalid datasets.");
             var exported = Path.Combine(directory, "historical-export.json");
@@ -75,7 +76,12 @@ internal static class DesktopSmokeTest
             await CaptureAsync(history, Path.Combine(directory, "historical-data.png"), 1100, 760);
             await CaptureAsync(history, Path.Combine(directory, "historical-data-compact.png"), 900, 700);
             history.Close();
+            var exampleHistoryPath = Path.Combine(exampleLibrary, "desktop-example.json");
+            var exampleHistory = Json.Read<MarketDataset>(exampleHistoryPath);
+            Json.Write(exampleHistoryPath, exampleHistory with { Bars = exampleHistory.Bars.Select(b =>
+                b with { Instrument = b.Instrument with { Venue = "different-data-source" } }).ToList() });
             var first = BacktestWorkspace.RunAsync(path, config, exampleLibrary).GetAwaiter().GetResult();
+            Require(first.Result.Fills.Single().Instrument.Venue == "different-data-source", "Symbol binding must retain source metadata without requiring the strategy to name its venue.");
             if (first.Result.Fills.Count != 1 || first.Result.Equity.Count < 365)
                 throw new InvalidOperationException("Example did not execute the expected holding strategy.");
             var equityPath = Path.Combine(first.Output, "equity.csv");

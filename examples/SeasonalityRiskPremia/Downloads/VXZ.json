@@ -1,0 +1,10 @@
+{
+  "provider": "alpaca",
+  "feed": "sip",
+  "request": {
+    "instrument": { "venue": "US", "assetClass": "Equity", "symbol": "VXZ" },
+    "interval": { "name": "1d", "minutes": 1440 },
+    "start": "2020-11-01T00:00:00Z",
+    "end": "2026-09-12T00:00:00Z"
+  }
+}

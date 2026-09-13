@@ -15,6 +15,10 @@ public interface IStrategyContext
     IReadOnlyList<MarketSession> Sessions => Array.Empty<MarketSession>();
     /// <summary>Allocates a positive fraction of initial capital during startup; names must be unique and total weights at most one.</summary>
     void Register(string substrategy, decimal capitalWeight);
+    /// <summary>Resolves a symbol to its dataset instrument metadata; missing or ambiguous history is an error.</summary>
+    Instrument ResolveInstrument(string symbol);
+    /// <summary>Returns completed history by symbol, independently of provider and venue labels.</summary>
+    IReadOnlyList<Bar> History(string symbol, int count) => History(ResolveInstrument(symbol), count);
     /// <summary>Returns up to count completed bars in chronological order as a copy; count must be nonnegative.</summary>
     IReadOnlyList<Bar> History(Instrument instrument, int count);
     /// <summary>Submits an additional signed-quantity order and returns its ID; acceptance does not guarantee execution.</summary>

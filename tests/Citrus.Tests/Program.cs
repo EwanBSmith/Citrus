@@ -29,6 +29,80 @@ BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOpt
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
+Test("Completed-close execution is opt-in and publishes synchronous positions without future history", () =>
+{
+    foreach (var legacy in new[] { false, true })
+    {
+        var result = Run(new CallbackStrategy(onBar: (c, _) =>
+        {
+            if (c.History(instrument, 10).Count != 1) return;
+            c.Submit(new("a", instrument, 1));
+            Equal(legacy ? 1m : 0m, c.Portfolio.Positions.Sum(p => p.Quantity));
+            Equal(1, c.History(instrument, 10).Count);
+        }), options: new() { ExecuteMarketOrdersAtCompletedClose = legacy });
+        Equal(legacy ? 100m : 110m, result.Fills.Single().Price);
+    }
+});
+Test("Legacy close prices round entries before slippage and exits after slippage", () =>
+{
+    var ledger = new Ledger(1000); ledger.Register("a", 1);
+    var options = new SimulationOptions { ExecuteMarketOrdersAtCompletedClose = true, CompletedCloseTickSize = .01m, ZorroDailySlippageSeconds = 5 };
+    var book = new OrderBook(ledger, options, 1);
+    var bar = new Bar(instrument, start, start.AddDays(1), 55m, 56m, 54m, 54.8737983703613m, 1000);
+    var next = new Bar(instrument, start.AddDays(1), start.AddDays(2), 54.7748794555664m, 55.0530471801758m, 54.6512489318848m, 55.0036010742188m, 1000);
+    ledger.Mark(instrument, bar.Close);
+    var entry = book.Submit(new("a", instrument, 1), bar.CloseTime);
+    book.ExecuteCompletedClose(entry, bar, next);
+    var exit = book.Submit(new("a", instrument, -1), bar.CloseTime);
+    book.ExecuteCompletedClose(exit, bar, next);
+    Equal(54.87m, book.Fills[0].Price); Equal(54.88m, book.Fills[1].Price);
+    Equal(0m, ledger.Quantity("a", instrument));
+});
+Test("Legacy daily slippage handles bullish bearish and flat candles with linear delay", () =>
+{
+    foreach (var (close, delay, expected) in new[] { (101m, 5d, 100.17m), (99m, 5d, 100m), (100m, 5d, 100.03m), (101m, 10d, 100.34m) })
+    {
+        var ledger = new Ledger(1000); ledger.Register("a", 1); ledger.Mark(instrument, 100);
+        var book = new OrderBook(ledger, new() { ExecuteMarketOrdersAtCompletedClose = true, CompletedCloseTickSize = .01m, ZorroDailySlippageSeconds = delay }, 1);
+        var bar = new Bar(instrument, start, start.AddDays(1), 100, 110, 90, 100, 1000);
+        var next = new Bar(instrument, start.AddDays(1), start.AddDays(2), 100, 110, 90, close, 1000);
+        var following = new Bar(instrument, start.AddDays(2), start.AddDays(3), 102, 110, 90, 103, 1000);
+        book.ExecuteCompletedClose(book.Submit(new("a", instrument, 1), bar.CloseTime), bar, next, following);
+        Equal(expected, book.Fills.Single().Price);
+    }
+});
+Test("Legacy execution rejects invalid options and mismatched order bars", () =>
+{
+    Throws<ArgumentException>(() => new SimulationOptions { CompletedCloseTickSize = -.01m }.Validate());
+    Throws<ArgumentException>(() => new SimulationOptions { ZorroDailySlippageSeconds = 5 }.Validate());
+    Throws<ArgumentException>(() => new SimulationOptions { ExecuteMarketOrdersAtCompletedClose = true, ZorroDailySlippageSeconds = double.NaN }.Validate());
+    var ledger = new Ledger(1000); ledger.Register("a", 1);
+    var bar = Data(100).Bars[0];
+    var disabled = new OrderBook(ledger, new(), 1);
+    Throws<InvalidOperationException>(() => disabled.ExecuteCompletedClose(1, bar));
+    var book = new OrderBook(ledger, new() { ExecuteMarketOrdersAtCompletedClose = true }, 1);
+    var limit = book.Submit(new("a", instrument, 1, OrderType.Limit, 100), bar.CloseTime);
+    Throws<InvalidOperationException>(() => book.ExecuteCompletedClose(limit, bar));
+    var stale = book.Submit(new("a", instrument, 1), bar.CloseTime.AddMinutes(1));
+    Throws<InvalidOperationException>(() => book.ExecuteCompletedClose(stale, bar));
+});
+Test("Legacy daily execution retains the terminal projection without exposing future bars", () =>
+{
+    var fixture = Data(100, 102, 101);
+    var data = fixture with { Interval = BarInterval.Daily,
+        Bars = fixture.Bars.Select((b, i) => b with { OpenTime = start.AddDays(i), CloseTime = start.AddDays(i + 1) }).ToList() };
+    data.Bars[1] = data.Bars[1] with { Open = 100, High = 110, Low = 99 };
+    var result = Run(new CallbackStrategy(onBar: (c, _) =>
+    {
+        var count = c.History(instrument, 10).Count;
+        if (count == 1) c.Submit(new("a", instrument, 1));
+        if (count == 3) c.Submit(new("a", instrument, -1));
+        Equal(count, c.History(instrument, 10).Count);
+    }), data, new() { ExecuteMarketOrdersAtCompletedClose = true, CompletedCloseTickSize = .01m, ZorroDailySlippageSeconds = 5 });
+    Equal(100.17m, result.Fills[0].Price); Equal(101.17m, result.Fills[1].Price);
+    Equal(0m, result.Fills.Sum(f => f.ExecutionCost));
+    Equal(1001m, result.Final.Equity);
+});
 Test("Strategy folders select named backtests and resolve paths independently of the working directory", () =>
 {
     var root = Temporary();
@@ -232,6 +306,71 @@ Test("Cache fetches only missing coverage and reuses valid bars", () =>
     cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
     cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
     Equal(2, provider.Requests.Count); Equal(start.AddHours(2), provider.Requests[1].Start);
+});
+Test("Symbol binding resolves legacy venues and case across history orders and positions", () =>
+{
+    var alias = instrument with { Venue = "another-source", Symbol = "btc" };
+    var result = Run(new CallbackStrategy(onStart: c =>
+    {
+        Equal(instrument, c.ResolveInstrument("btc"));
+        Equal(0, c.History("BTC", 5).Count);
+        new InstrumentContext(c, "a", "btc").Buy(1);
+    }, onBar: (c, _) =>
+    {
+        Equal(c.History(instrument, 5).Count, c.History(alias, 5).Count);
+        if (c.History(alias, 5).Count == 1)
+        {
+            Equal(1m, new InstrumentContext(c, "a", alias).Quantity);
+            c.Rebalance("a", new Dictionary<Instrument, decimal> { [alias] = 0 });
+        }
+    }));
+    Equal(2, result.Fills.Count);
+    True(result.Fills.All(f => f.Instrument == instrument));
+    Equal(0m, result.Final.Positions.Single().Quantity);
+    var direct = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", alias, 1))));
+    Equal(instrument, direct.Fills.Single().Instrument);
+});
+Test("Missing symbols and asset-class mismatches fail before silent warmup", () =>
+{
+    Run(new CallbackStrategy(onStart: c =>
+    {
+        Throws<ArgumentException>(() => new InstrumentContext(c, "a", "MISSING"));
+        Throws<ArgumentException>(() => c.History("MISSING", 90));
+        Throws<ArgumentException>(() => c.Submit(new("a", instrument with { AssetClass = AssetClass.Equity }, 1)));
+        Throws<ArgumentException>(() => new InstrumentContext(c, "a", instrument with { AssetClass = AssetClass.Equity }));
+    }));
+});
+Test("Symbol histories reject conflicting instrument definitions", () =>
+{
+    var data = Data(100, 110);
+    var conflict = data.Bars[0] with { Instrument = instrument with { Venue = "other" } };
+    Throws<InvalidDataException>(() => DatasetValidator.Validate(data with { Bars = data.Bars.Append(conflict).ToList() }));
+});
+Test("Symbol cache reuses source metadata without provider-keyed duplicates", () =>
+{
+    var directory = Temporary(); var cache = new DataCache(directory);
+    var first = new FixtureProvider(Data(100, 110, 120));
+    var request = new DataRequest(instrument, BarInterval.Hourly, start, start.AddHours(2));
+    cache.GetAsync(first, request, []).GetAwaiter().GetResult();
+    Equal("symbol-BTC-60.json", Path.GetFileName(Directory.GetFiles(directory).Single()));
+    var aliasRequest = request with { Instrument = instrument with { Venue = "elsewhere", Symbol = "btc" } };
+    var reused = cache.GetAsync(new NamedFixtureProvider(Data(900, 900), "different-source"), aliasRequest, []).GetAwaiter().GetResult();
+    Equal("fixture", reused.Provider); Equal(100m, reused.Bars[0].Close);
+    Equal(1, Directory.GetFiles(directory).Length);
+    var before = File.ReadAllText(Directory.GetFiles(directory).Single());
+    Throws<InvalidDataException>(() => cache.GetAsync(new NamedFixtureProvider(Data(900, 900, 900), "different-source"),
+        aliasRequest with { End = start.AddHours(3) }, []).GetAwaiter().GetResult());
+    Equal(before, File.ReadAllText(Directory.GetFiles(directory).Single()));
+    var extended = cache.GetAsync(first, aliasRequest with { End = start.AddHours(3) }, []).GetAwaiter().GetResult();
+    Equal(3, extended.Bars.Count); Equal(2, first.Requests.Count);
+});
+Test("Symbol cache rejects multiple files instead of selecting by provider", () =>
+{
+    var directory = Temporary(); var data = Data(100);
+    Json.Write(Path.Combine(directory, "one.json"), data);
+    Json.Write(Path.Combine(directory, "two.json"), data with { Provider = "other" });
+    Throws<InvalidDataException>(() => new DataCache(directory).GetAsync(new FixtureProvider(data),
+        new(instrument, BarInterval.Hourly, start, start.AddHours(1)), []).GetAwaiter().GetResult());
 });
 Test("Backtest data is assembled read-only from the main historical cache", () =>
 {
@@ -580,6 +719,48 @@ Test("Payday compiled example trades exact sessions and early month-end closes a
     }
     True(result.Final.Positions.All(p => p.Quantity == 0));
     True(result.Orders.All(o => o.Request.Type == OrderType.MarketOnClose && o.Request.TimeInForce == TimeInForce.Day));
+});
+// Supply all nine ETF identities over holiday-aware daily fixtures for the ten-sleeve strategy.
+MarketDataset CombinedSeasonalityData()
+{
+    var data = PaydayData();
+    var symbols = new[] { "SCHB", "TLT", "GLDM", "UGA", "UVXY", "VXZ", "SVXY", "VIXY", "BOIL" };
+    return data with { Bars = data.Bars.SelectMany((b, index) => symbols.Select(symbol =>
+    {
+        var price = symbol == "SCHB" ? 100m + index % 8 : 100m;
+        return b with { Instrument = new("US", AssetClass.Equity, symbol), Open = price, High = price, Low = price, Close = price };
+    })).ToList() };
+}
+Test("Combined strategy registers ten sleeves and trades holiday gold, oil and winter gas", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "SeasonalityRiskPremia.cs"));
+    var data = CombinedSeasonalityData();
+    var result = new BacktestEngine().Run(compiled.Strategy, data, Config() with { InitialCash = 17000 });
+    Equal(10, result.Equity.First().Substrategies.Count);
+    var gold = result.Fills.Where(f => f.Substrategy == "GoldSeason").ToArray();
+    True(gold.Length > 0);
+    True(gold.Where(f => f.Quantity > 0).All(f => f.Time.DayOfWeek == DayOfWeek.Thursday));
+    True(gold.Where(f => f.Quantity < 0).All(f => f.Time.DayOfWeek != DayOfWeek.Thursday));
+    var oil = result.Fills.Where(f => f.Substrategy == "OilSeason").ToArray();
+    True(oil.Any(f => f.Time.Date == new DateTime(2024, 11, 21) && f.Quantity == 11));
+    True(oil.Any(f => f.Time.Date == new DateTime(2024, 11, 26) && f.Quantity == -11));
+    True(oil.Any(f => f.Time.Date == new DateTime(2024, 11, 27) && f.Quantity == -11));
+    True(oil.Any(f => f.Time.Date == new DateTime(2024, 11, 29) && f.Quantity == 11));
+    True(result.Final.Positions.Any(p => p.Substrategy == "ShortGas" && p.Quantity == -10));
+    True(result.Fills.Any(f => f.Substrategy == "VIXHedge" && f.Instrument.Symbol == "UVXY" && f.Quantity < 0));
+    True(result.Fills.Any(f => f.Substrategy == "VIXHedge" && f.Instrument.Symbol == "VXZ" && f.Quantity > 0));
+    True(result.Fills.Any(f => f.Substrategy == "VIXBasis"));
+    True(result.Fills.Any(f => f.Substrategy == "EqBondPair"));
+    True(result.Fills.Where(f => f.Substrategy is "VIXBasis" or "VIXHedge" or "EqBondPair").All(f => data.Sessions.Any(s => s.Open == f.Time)));
+    var repeated = new BacktestEngine().Run(compiled.Strategy, data, Config() with { InitialCash = 17000 });
+    True(result.Fills.SequenceEqual(repeated.Fills), "A reused strategy must reset indicator state.");
+});
+Test("Combined strategy rejects missing ETF histories at symbol binding", () =>
+{
+    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "SeasonalityRiskPremia.cs"));
+    var data = CombinedSeasonalityData();
+    Throws<ArgumentException>(() => new BacktestEngine().Run(compiled.Strategy,
+        data with { Bars = data.Bars.Where(b => b.Instrument.Symbol != "VXZ").ToList() }, Config() with { InitialCash = 17000 }));
 });
 Test("Payday sizing uses completed prices, skips unaffordable lots, and never shorts after rejected entries", () =>
 {

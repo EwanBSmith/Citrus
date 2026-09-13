@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "initialCash": 17000,
+  "output": "Results/Default",
+  "simulation": {
+    "executeMarketOrdersAtCompletedClose": true,
+    "completedCloseTickSize": 0.01,
+    "zorroDailySlippageSeconds": 5,
+    "annualBorrowRate": 0,
+    "shortsAvailable": true
+  }
+}

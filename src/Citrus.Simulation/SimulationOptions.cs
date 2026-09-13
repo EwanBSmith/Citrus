@@ -3,6 +3,12 @@ namespace Citrus.Simulation;
 /// <summary>Configures execution costs, rejection probability, margin fractions, and equity borrowing.</summary>
 public sealed record SimulationOptions
 {
+    /// <summary>Opt-in legacy bar-test compatibility: market orders submitted during a completed-bar callback fill immediately at that close. This is not next-event execution.</summary>
+    public bool ExecuteMarketOrdersAtCompletedClose { get; init; }
+    /// <summary>Optional tick rounding for legacy completed-close executions; zero preserves the supplied price.</summary>
+    public decimal CompletedCloseTickSize { get; init; }
+    /// <summary>Opt-in Zorro daily-bar extrapolation delay; requires completed-close mode and daily source bars. Future bars are used only by execution, never strategy history.</summary>
+    public double ZorroDailySlippageSeconds { get; init; }
     /// <summary>Gets the fixed commission per external net order, allocated across its attributed fills.</summary>
     public decimal CommissionFixed { get; init; }
     /// <summary>Gets the commission per absolute unit externally executed.</summary>
@@ -30,7 +36,9 @@ public sealed record SimulationOptions
     {
         if (!double.IsFinite(RejectionProbability) || RejectionProbability is < 0 or > 1)
             throw new ArgumentException("RejectionProbability must be between zero and one.");
-        if (CommissionFixed < 0 || CommissionPerUnit < 0 || SpreadBps < 0 || SlippageBps < 0 || AnnualBorrowRate < 0)
+        if (!double.IsFinite(ZorroDailySlippageSeconds) || ZorroDailySlippageSeconds < 0 || ZorroDailySlippageSeconds > 0 && !ExecuteMarketOrdersAtCompletedClose)
+            throw new ArgumentException("Zorro daily slippage requires completed-close execution and a finite nonnegative delay.");
+        if (CommissionFixed < 0 || CommissionPerUnit < 0 || SpreadBps < 0 || SlippageBps < 0 || AnnualBorrowRate < 0 || CompletedCloseTickSize < 0)
             throw new ArgumentException("Costs must be nonnegative.");
         if (SpreadBps / 2 + SlippageBps >= 10000) throw new ArgumentException("Combined execution cost must be less than 100 percent.");
         if (EquityMaintenanceMargin <= 0 || EquityInitialMargin < EquityMaintenanceMargin || EquityInitialMargin > 1 ||

@@ -12,6 +12,30 @@
     "realizedPnl": 1877.14621084
   },
   {
+    "substrategy": "EqBondPair",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "SCHB",
+      "key": "US:Equity:SCHB"
+    },
+    "quantity": 0,
+    "averagePrice": 0,
+    "realizedPnl": 459.74651200
+  },
+  {
+    "substrategy": "EqBondPair",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "TLT",
+      "key": "US:Equity:TLT"
+    },
+    "quantity": 9,
+    "averagePrice": 81.31626,
+    "realizedPnl": -125.10616496
+  },
+  {
     "substrategy": "EqBondReversion",
     "instrument": {
       "venue": "US",
@@ -21,7 +45,7 @@
     },
     "quantity": 0,
     "averagePrice": 0,
-    "realizedPnl": 918.34138724
+    "realizedPnl": 919.5724192400000000000000002
   },
   {
     "substrategy": "EqBondReversion",
@@ -33,7 +57,31 @@
     },
     "quantity": 0,
     "averagePrice": 0,
-    "realizedPnl": 712.54624800000000000000000013
+    "realizedPnl": 712.99301800000000000000000013
+  },
+  {
+    "substrategy": "GoldSeason",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "GLDM",
+      "key": "US:Equity:GLDM"
+    },
+    "quantity": 0.0,
+    "averagePrice": 0,
+    "realizedPnl": 33.245305900
+  },
+  {
+    "substrategy": "OilSeason",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "UGA",
+      "key": "US:Equity:UGA"
+    },
+    "quantity": 0,
+    "averagePrice": 0,
+    "realizedPnl": 694.34855166
   },
   {
     "substrategy": "PaydaySeason",
@@ -68,8 +116,8 @@
       "key": "US:Equity:SCHB"
     },
     "quantity": 33,
-    "averagePrice": 24.161346354874235582809112412,
-    "realizedPnl": 472.82294171084977423270070974
+    "averagePrice": 24.161340268555527568304477948,
+    "realizedPnl": 473.11778886233240975404777229
   },
   {
     "substrategy": "RiskPremia",
@@ -80,7 +128,67 @@
       "key": "US:Equity:TLT"
     },
     "quantity": 17,
-    "averagePrice": 98.36704433356900452488687782,
-    "realizedPnl": -126.94334832932692307692307692
+    "averagePrice": 98.36520957547641837800208841,
+    "realizedPnl": -126.93806321690088757396449706
+  },
+  {
+    "substrategy": "ShortGas",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "BOIL",
+      "key": "US:Equity:BOIL"
+    },
+    "quantity": 0.0000,
+    "averagePrice": 0,
+    "realizedPnl": 1815.9923833600000000000000004
+  },
+  {
+    "substrategy": "VIXBasis",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "SVXY",
+      "key": "US:Equity:SVXY"
+    },
+    "quantity": 13,
+    "averagePrice": 47.677311333333333333333333333,
+    "realizedPnl": 1405.5419953333333333333333336
+  },
+  {
+    "substrategy": "VIXBasis",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "VIXY",
+      "key": "US:Equity:VIXY"
+    },
+    "quantity": 0.00,
+    "averagePrice": 0,
+    "realizedPnl": 145.61777400000000000000000001
+  },
+  {
+    "substrategy": "VIXHedge",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "UVXY",
+      "key": "US:Equity:UVXY"
+    },
+    "quantity": -29.1456,
+    "averagePrice": 34.628670847764740647649210017,
+    "realizedPnl": 2138.2410551793879749798751848
+  },
+  {
+    "substrategy": "VIXHedge",
+    "instrument": {
+      "venue": "US",
+      "assetClass": "Equity",
+      "symbol": "VXZ",
+      "key": "US:Equity:VXZ"
+    },
+    "quantity": 31.75,
+    "averagePrice": 63.778995315940859187759490488,
+    "realizedPnl": -717.39968221887772078863617686
   }
 ]

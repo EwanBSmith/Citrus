@@ -53,6 +53,31 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
     }
     /// <summary>Appends a status update and its notification index, preserving callback order relative to fills.</summary>
     private void Update(OrderUpdate update) { Notifications.Add((false, Updates.Count)); Updates.Add(update); }
+
+    /// <summary>Executes one just-submitted market order at a known completed close in explicit legacy compatibility mode.</summary>
+    public void ExecuteCompletedClose(long orderId, Bar bar, Bar? nextBar = null, Bar? followingBar = null)
+    {
+        if (!options.ExecuteMarketOrdersAtCompletedClose) throw new InvalidOperationException("Completed-close execution is disabled.");
+        var order = pending.SingleOrDefault(o => o.Id == orderId);
+        if (order is null) return;
+        if (order.Request.Type != OrderType.Market || order.Request.Instrument != bar.Instrument || order.Submitted != bar.CloseTime)
+            throw new InvalidOperationException("Completed-close execution requires a current market order and matching completed bar.");
+        var reducing = ledger.Quantity(order.Request.Substrategy, bar.Instrument) * order.Remaining < 0;
+        var raw = options.CompletedCloseTickSize > 0 && !reducing
+            ? Math.Round(bar.Close / options.CompletedCloseTickSize, MidpointRounding.AwayFromZero) * options.CompletedCloseTickSize : bar.Close;
+        var legacySlippage = 0m;
+        if (options.ZorroDailySlippageSeconds > 0 && nextBar is not null)
+        {
+            var move = nextBar.Close > nextBar.Open ? nextBar.High - nextBar.Open
+                : nextBar.Close == nextBar.Open && followingBar is not null ? Math.Max(0, followingBar.Open - nextBar.Close) : 0;
+            legacySlippage = move * (decimal)(options.ZorroDailySlippageSeconds / Math.Sqrt(86400));
+            raw += legacySlippage;
+        }
+        var price = options.CompletedCloseTickSize > 0
+            ? Math.Round(raw / options.CompletedCloseTickSize, MidpointRounding.AwayFromZero) * options.CompletedCloseTickSize : raw;
+        Route([order], price, bar.CloseTime, null, legacySlippage);
+        if (order.Remaining == 0 && pending.Contains(order)) Finish(order, OrderStatus.Filled, bar.CloseTime);
+    }
     /// <summary>Removes a pending order and records cancellation, returning false when the ID is not pending.</summary>
     public bool Cancel(long id, DateTimeOffset time, string reason = "Cancelled")
     {
@@ -137,7 +162,7 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
         }
     }
     /// <summary>Prices and risk-checks the net residual, then rejects it or allocates external fills and commission across its orders.</summary>
-    private void Route(PendingOrder[] orders, decimal reference, DateTimeOffset time, decimal? limit)
+    private void Route(PendingOrder[] orders, decimal reference, DateTimeOffset time, decimal? limit, decimal signedSlippagePerUnit = 0)
     {
         if (orders.Length == 0) return;
         var quantity = orders.Sum(o => o.Remaining);
@@ -169,7 +194,8 @@ public sealed class OrderBook(Ledger ledger, SimulationOptions options, int seed
             var order = orders[index];
             var cost = index == orders.Length - 1 ? remainingCost : commission * Math.Abs(order.Remaining / quantity);
             remainingCost -= cost;
-            FillOrder(order, order.Remaining, price, cost, false, time, Math.Abs(order.Remaining) * Math.Abs(price - reference));
+            FillOrder(order, order.Remaining, price, cost, false, time,
+                Math.Abs(order.Remaining) * Math.Abs(price - reference) + order.Remaining * signedSlippagePerUnit);
         }
     }
     /// <summary>Books an attributed fill, queues its notification, and reduces the signed unfilled quantity.</summary>
