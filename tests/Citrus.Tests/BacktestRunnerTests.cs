@@ -3,7 +3,7 @@ using Citrus.Data;
 using Citrus.Engine;
 using Citrus.Trading;
 
-/// <summary>Checks built-in execution, configuration paths, captured history and replay build identity.</summary>
+/// <summary>Checks built-in execution, configuration paths, captured history and audit exports.</summary>
 internal static class BacktestRunnerTests
 {
     /// <summary>Registers cache and export integration cases with the offline runner.</summary>
@@ -29,42 +29,14 @@ internal static class BacktestRunnerTests
                 });
                 Require(notified == 1 && edited.Output == Path.Combine(fixture.Root, "Edited"), "Supplied settings were ignored.");
                 Require(RunConfiguration.Read(fixture.Path).Seed == 42, "Execution mutated saved settings.");
+                var saved = RunConfiguration.Read(Path.Combine(edited.Output, "run.json"));
+                Require(saved.StrategyType == supplied.StrategyType && saved.Output == supplied.Output && saved.Seed == 99,
+                    "The audit configuration does not match the executed settings.");
+                using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(edited.Output, "manifest.json")));
+                Require(manifest.RootElement.GetProperty("componentHashes").TryGetProperty("Citrus.Strategies", out _),
+                    "The audit manifest lost strategy build provenance.");
             });
 
-        test("Replay uses captured history and safely overwrites its own output", () =>
-        {
-            var fixture = CreateFixture(AssetClass.LinearPerpetual);
-            var first = BacktestRunner.Run(fixture.Path, historicalDataDirectory: fixture.Cache);
-            var exports = new[] { "summary.json", "orders.json", "fills.json", "costs.json", "equity.csv", "historical-data.json" }
-                .ToDictionary(name => name, name => File.ReadAllBytes(Path.Combine(first.Output, name)));
-            File.Delete(Path.Combine(fixture.Cache, "fixture.json"));
-            var replay = BacktestRunner.Replay(first.Output);
-            Require(replay.Output == Path.Combine(first.Output, "replay-results"), "Replay output was not relative to run.json.");
-            foreach (var (name, bytes) in exports)
-                Require(bytes.SequenceEqual(File.ReadAllBytes(Path.Combine(replay.Output, name))), "Replay changed " + name);
-            var path = Path.Combine(first.Output, "run.json");
-            Json.Write(path, RunConfiguration.Read(path) with { Output = "." });
-            File.WriteAllText(Path.Combine(first.Output, "retain.txt"), "unrelated");
-            BacktestRunner.Replay(first.Output);
-            foreach (var (name, bytes) in exports)
-                Require(bytes.SequenceEqual(File.ReadAllBytes(Path.Combine(first.Output, name))), "In-place replay changed " + name);
-            Require(File.ReadAllText(Path.Combine(first.Output, "retain.txt")) == "unrelated", "Replay removed unrelated files.");
-        });
-        test("Replay rejects a different Citrus build or changed captured history", () =>
-        {
-            var fixture = CreateFixture(AssetClass.LinearPerpetual);
-            var first = BacktestRunner.Run(fixture.Path, historicalDataDirectory: fixture.Cache);
-            var path = Path.Combine(first.Output, "manifest.json");
-            var original = File.ReadAllText(path);
-            var manifest = JsonNode.Parse(original)!;
-            manifest["componentHashes"]!["Citrus.Strategies"] = "different-build";
-            File.WriteAllText(path, manifest.ToJsonString());
-            Throws<InvalidDataException>(() => BacktestRunner.Replay(first.Output));
-            File.WriteAllText(path, original);
-            File.AppendAllText(Path.Combine(first.Output, "historical-data.json"), " ");
-            Throws<InvalidDataException>(() => BacktestRunner.Replay(first.Output));
-            Require(!Directory.Exists(Path.Combine(first.Output, "replay-results")), "Invalid replay wrote output.");
-        });
         test("Built-in declarations resolve before cache access and invalid selections fail before export", () =>
         {
             var fixture = CreateFixture(AssetClass.LinearPerpetual);

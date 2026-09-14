@@ -13,7 +13,6 @@ try
           strategies (list built-in strategy types)
           validate <run.json>
           backtest <run.json>
-          replay <results-folder> (requires the original Citrus build and captured historical-data.json)
           data generate <generation.json> <output.json>
           data import <dataset.json> <output.json> [supplement.json ...]
           data download <download.json> <output.json>
@@ -33,9 +32,9 @@ try
         StrategyConfiguration.Resolve(strategy, configuration);
         Console.WriteLine($"Valid strategy: {strategy.GetType().FullName}"); return 0;
     }
-    if (args[0] is "backtest" or "replay" && args.Length == 2)
+    if (args[0] == "backtest" && args.Length == 2)
     {
-        var completed = args[0] == "replay" ? BacktestRunner.Replay(args[1]) : BacktestRunner.Run(args[1]);
+        var completed = BacktestRunner.Run(args[1]);
         Console.WriteLine($"Completed: {completed.Result.Fills.Count} attributed fills; final equity {completed.Result.Final.Equity.ToString("F2", CultureInfo.InvariantCulture)}. Results: {completed.Output}"); return 0;
     }
     if (args.Length >= 4 && args[0] == "data")

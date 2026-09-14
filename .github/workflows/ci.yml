@@ -29,6 +29,5 @@ jobs:
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate tests/Citrus.Tests/Fixtures/DemoGeneration.json artifacts/cache/demo-data.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- validate Backtests/Demo.json
       - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest Backtests/Demo.json
-      - run: dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- replay Results/Demo
       - if: runner.os == 'Windows'
         run: dotnet run --project src/Citrus.Desktop -c Release --no-build --no-restore -- --smoke-test artifacts/desktop-smoke

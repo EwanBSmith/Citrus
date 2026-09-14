@@ -89,7 +89,7 @@ public static class Reports
             p.Substrategies.Select(s => new object?[] { p.Time, s.Key, s.Value })));
         // Compute the file SHA-256 digest used to identify captured inputs and runtime components.
         string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
-        Json.Write(Path.Combine(directory, "run.json"), configuration with { Output = "replay-results" });
+        Json.Write(Path.Combine(directory, "run.json"), configuration);
         Json.Write(Path.Combine(directory, "manifest.json"), new
         {
             schemaVersion = 1, configuration, configuration.Seed,

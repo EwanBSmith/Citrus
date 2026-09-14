@@ -18,7 +18,7 @@ The source requirements remain unchanged. This table maps first-release requirem
 | UR-EQ-001–005 | Market, limit, opening, closing, and equity shorts | Timing, gap fills, session/DST/holiday, limit, short-availability tests |
 | UR-STRAT-001–003/005 | C# API, rebalance helper, per-run external-data cache, SMA/EMA | Pending-aware rebalance, external-data cache and indicator tests |
 | UR-TEST-001 | Dependency-free automated unit/integration executable | `dotnet run --project tests/Citrus.Tests` |
-| UR-PLAT-005/007; UR-SCOPE-004–007 | Windows WPF/XAML workbench: built-in strategy selection and main-solution IDE launch, configuration controls, background backtests, ScottPlot equity chart and result tables | WPF desktop smoke check: built-in discovery and standalone settings, offline example, replay/export, invalid inputs, configuration precision, displayed result bindings, normal/compact/high-DPI rendering |
+| UR-PLAT-005/007; UR-SCOPE-004–007 | Windows WPF/XAML workbench: built-in strategy selection and main-solution IDE launch, configuration controls, background backtests, ScottPlot equity chart and result tables | WPF desktop smoke check: built-in discovery and standalone settings, offline example, repeated runs/export, invalid inputs, configuration precision, displayed result bindings, normal/compact/high-DPI rendering |
 | UR-SCOPE-002/003; UR-OPT-001/002 | Planned optimisation and walk-forward | Deferred; no implementation claim |
 | UR-PLAT-002; UR-BRK-001/002; UR-LIVE-001–003 | Live execution remains a later release | Deferred; only market-data connections implemented |
 

@@ -11,30 +11,7 @@ public static class BacktestRunner
     /// <summary>Runs saved or supplied settings against the historical cache; the callback receives effective settings before data loading.</summary>
     /// <remarks>Executes synchronously. UI callers should dispatch the work and marshal configuration notifications to their UI thread.</remarks>
     public static CompletedBacktest Run(string configurationPath, RunConfiguration? configuration = null,
-        string? historicalDataDirectory = null, Action<RunConfiguration, IReadOnlyCollection<string>>? onConfigured = null) =>
-        Execute(configurationPath, configuration, effective => DataCache.Load(
-            historicalDataDirectory ?? GlobalConfiguration.Load().ResolveHistoricalDataDirectory(),
-            effective.Interval, effective.Start, effective.End), onConfigured);
-
-    /// <summary>Runs the matching built-in strategy using its saved configuration and historical-data.json without reading the live cache.</summary>
-    public static CompletedBacktest Replay(string resultsDirectory)
-    {
-        var directory = Path.GetFullPath(resultsDirectory);
-        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
-        var recorded = manifest.RootElement.GetProperty("componentHashes");
-        foreach (var (name, hash) in BuiltInStrategies.ComponentHashes())
-            if (!recorded.TryGetProperty(name, out var value) || value.GetString() != hash)
-                throw new InvalidDataException("Replay requires the original Citrus build; component differs: " + name);
-        var dataPath = Path.Combine(directory, "historical-data.json");
-        if (manifest.RootElement.GetProperty("dataHash").GetString() != Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(dataPath))))
-            throw new InvalidDataException("Captured historical data has changed.");
-        return Execute(Path.Combine(directory, "run.json"), null,
-            _ => Json.Read<MarketDataset>(Path.Combine(directory, "historical-data.json")), null);
-    }
-
-    /// <summary>Creates a fresh built-in strategy for configuration, simulation, and export.</summary>
-    private static CompletedBacktest Execute(string configurationPath, RunConfiguration? configuration,
-        Func<RunConfiguration, MarketDataset> loadData, Action<RunConfiguration, IReadOnlyCollection<string>>? onConfigured)
+        string? historicalDataDirectory = null, Action<RunConfiguration, IReadOnlyCollection<string>>? onConfigured = null)
     {
         configurationPath = Path.GetFullPath(configurationPath);
         configuration ??= RunConfiguration.Read(configurationPath);
@@ -45,7 +22,8 @@ public static class BacktestRunner
             throw new ArgumentException("An output path is required.");
 
         var output = Path.GetFullPath(effective.Output, Path.GetDirectoryName(configurationPath)!);
-        var data = loadData(effective);
+        var data = DataCache.Load(historicalDataDirectory ?? GlobalConfiguration.Load().ResolveHistoricalDataDirectory(),
+            effective.Interval, effective.Start, effective.End);
         Directory.CreateDirectory(output);
         var dataPath = Path.Combine(output, "historical-data.json");
         Json.Write(dataPath, data);

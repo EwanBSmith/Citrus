@@ -89,7 +89,7 @@ internal static class DesktopSmokeTest
             File.WriteAllText(Path.Combine(first.Output, "retain.txt"), "Keep unrelated output files");
             BacktestRunner.Run(path, config, exampleLibrary);
             if (before != File.ReadAllText(equityPath) || !File.Exists(Path.Combine(first.Output, "retain.txt")))
-                throw new InvalidOperationException("Replay or output preservation failed.");
+                throw new InvalidOperationException("Repeated run or output preservation failed.");
             ExpectFailure(() => BacktestWorkspace.Parse("{\"unknownSetting\":1}"));
             ExpectFailure(() => BacktestRunner.Run(path, config, Path.Combine(directory, "missing-cache")));
             ExpectFailure(() => BacktestRunner.Run(path, config with { Start = DateTimeOffset.Parse("2025-01-02T00:00:00Z"), End = DateTimeOffset.Parse("2025-01-01T00:00:00Z") }, library));
@@ -196,7 +196,7 @@ internal static class DesktopSmokeTest
             errorWindow.SetError("Offline fixture error", new IOException("A fixture file could not be opened."));
             await CaptureAsync(errorWindow, Path.Combine(directory, "error-dialog.png"), 820, 480); errorWindow.Close();
 
-            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: WPF rendering, built-in strategy workflow, settings save/cancel/masking, damaged settings protection, historical library, offline backtests, deterministic replay, output preservation, strict JSON, configuration precision, background execution, result binding, configuration saves and restored controls.");
+            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: WPF rendering, built-in strategy workflow, settings save/cancel/masking, damaged settings protection, historical library, offline backtests, deterministic repeated runs, output preservation, strict JSON, configuration precision, background execution, result binding, configuration saves and restored controls.");
             return 0;
         }
         catch (Exception error)

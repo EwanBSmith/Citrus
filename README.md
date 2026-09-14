@@ -43,7 +43,6 @@ Launch the workbench with `dotnet run --project src/Citrus.Desktop -c Release` a
 ```powershell
 # Run ZorroPortfolio using the configured historical cache.
 dotnet run --project src/Citrus.Cli -c Release -- backtest Backtests/Default.json
-dotnet run --project src/Citrus.Cli -c Release -- replay Results/Default
 ```
 
 Default requires the portfolio ETF history in the configured cache. Demo requires BTC history; use the existing CLI data-generation command for synthetic data if needed. Commit strategy changes, backtest configurations and any engine changes together in this repository. The previously created standalone strategy repository is superseded; it is not required for this workflow.
@@ -66,7 +65,7 @@ Only explicitly assigned properties override JSON and GUI settings. Assigning ze
 
 The GUI reads built-in declarations when opening a configuration, displays effective values, and disables the fields controlled by C#. Rebuild and restart after source changes, then use **Validate** to refresh; **Run** always reloads the declarations. Strategy selection loads the matching declarations. Configuration occurs before cache selection, account creation, or `OnStart`/`Initialize`. Keep `Configure` deterministic and independent of market/context state. Declarations are frozen once per loaded strategy instance.
 
-CLI runs, GUI runs, and direct engine calls apply the same precedence rules. Reports record the effective configuration and declared options; built-in strategy replay uses the same strategy declarations. Paths, strategy selection, output locations, historical-cache locations and credentials remain outside strategy options. ZorroPortfolio defines its $17,000 capital, daily interval, zero borrowing and short availability in C#; its dates remain per-backtest settings.
+CLI runs, GUI runs, and direct engine calls apply the same precedence rules. Reports record the effective configuration and declared options. Paths, strategy selection, output locations, historical-cache locations and credentials remain outside strategy options. ZorroPortfolio defines its $17,000 capital, daily interval, zero borrowing and short availability in C#; its dates remain per-backtest settings.
 
 A standalone JSON configuration selects a built-in strategy by its full type name:
 
@@ -80,7 +79,7 @@ A standalone JSON configuration selects a built-in strategy by its full type nam
 
 Output paths are relative to the configuration file, regardless of the directory name. There is no special strategy-folder layout. Each strategy must be a public, concrete IStrategy with a public parameterless constructor in Citrus.Strategies. Use the CLI strategies command to list available names. Add dependencies and required content to Citrus.Strategies at build time. Loose source files, external projects, DLL selection, and strategy/reference/solution path settings are no longer supported; old JSON fields are rejected. Move strategy code into Citrus.Strategies and replace those fields with strategyType.
 
-Results contain run.json and historical-data.json for replay. The replay command uses the current built-in strategy and verifies the recorded application component hashes and historical-data hash before execution. Preserve the original Citrus build and runtime to replay old results; captured external-assembly runs from older versions are unsupported. Strategy-owned external I/O and randomness still require unchanged inputs and deterministic behavior.
+Results contain the effective configuration in `run.json`, the selected market data in `historical-data.json`, and build/input hashes in `manifest.json` as an audit record. Backtests always read from the configured historical cache. Repeatability requires unchanged strategy code, data, engine/runtime, external inputs and deterministic strategy behavior.
 
 To edit the interface visually, open `src/Citrus.Desktop/MainWindow.xaml` in Visual Studio's XAML Designer after restoring and building the solution. Each window and reusable panel has its own `.xaml` layout and matching `.xaml.cs` behavior file. See [desktop development and designer guidance](docs/desktop-development.md).
 
@@ -92,7 +91,7 @@ The default library is `%LOCALAPPDATA%\Citrus\HistoricalData`. Set the main cach
 
 Open **Settings → Global settings** in the Windows workbench to edit Alpaca API credentials and choose the main historical cache. **Save** creates or replaces the per-user file; **Cancel** discards edits. Credentials are masked by default and can be revealed explicitly. Clear a credential and save to remove its stored value.
 
-Both the desktop and CLI use `Citrus/config.json` under the operating system's application-data directory (`%APPDATA%\Citrus\config.json` on Windows). The dialog displays the full path. A missing file uses empty defaults; malformed or unsupported files produce an error and are not overwritten automatically. Credentials are stored as plain text, so keep this file private and outside source control. Global settings are not included in run configurations or replay exports.
+Both the desktop and CLI use `Citrus/config.json` under the operating system's application-data directory (`%APPDATA%\Citrus\config.json` on Windows). The dialog displays the full path. A missing file uses empty defaults; malformed or unsupported files produce an error and are not overwritten automatically. Credentials are stored as plain text, so keep this file private and outside source control. Global settings are not included in run configurations or result exports.
 
 ```json
 {
@@ -112,12 +111,11 @@ export CITRUS_HISTORICAL_DATA="artifacts/cache"
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data generate tests/Citrus.Tests/Fixtures/DemoGeneration.json artifacts/cache/demo-data.json
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- validate Backtests/Demo.json
 dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- backtest Backtests/Demo.json
-dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- replay Results/Demo
 ```
 
 Rerunning a backtest overwrites its result files in the configured output directory. Data commands also overwrite their output file, so the example commands can be rerun as written. Other files in the result directory are retained. Configuration paths resolve relative to the configuration file; data command output paths resolve relative to the working directory. JSON configuration rejects unknown properties so spelling errors are visible.
 
-The Demo backtest runs `Citrus.Strategies.DemoHold` against seeded synthetic BTC prices and records the built-in strategy identity for replay. Generated prices have zero funding unless supplementary funding events are added. The regression suite separately checks equity session timing, weekends and daylight-saving transitions.
+The Demo backtest runs `Citrus.Strategies.DemoHold` against seeded synthetic BTC prices and records the built-in strategy identity in its audit manifest. Generated prices have zero funding unless supplementary funding events are added. The regression suite separately checks equity session timing, weekends and daylight-saving transitions.
 
 ## Concise strategy API
 
@@ -252,7 +250,7 @@ Read [simulation rules](docs/simulation.md) and [requirement traceability](docs/
 - **Citrus.Trading** contains instruments, market data events, orders, portfolio records, and the strategy API. Its folders are Instruments, MarketData, Orders, Portfolio, and Strategies; all public types share the `Citrus.Trading` namespace so strategies need one import. This assembly has no dependency on storage, Roslyn, or simulation.
 - **Citrus.Data** owns datasets, providers, validation, caching, and JSON persistence.
 - **Citrus.Simulation** owns order execution, portfolio accounting, and `SimulationOptions`.
-- **Citrus.Engine** owns `RunConfiguration`, built-in strategy selection, backtest coordination, and reports. `BacktestRunner.Run` shares strategy loading, effective configuration, cache selection, execution and export between the CLI and desktop. `BacktestRunner.Replay` uses the same workflow with captured history. Both return a `CompletedBacktest` containing results, portfolio metrics and the absolute output directory; the desktop dispatches this synchronous work to a background thread.
+- **Citrus.Engine** owns `RunConfiguration`, built-in strategy selection, backtest coordination, and reports. `BacktestRunner.Run` shares strategy loading, effective configuration, cache selection, execution and export between the CLI and desktop. It returns a `CompletedBacktest` containing results, portfolio metrics and the absolute output directory; the desktop dispatches this synchronous work to a background thread.
 - **Citrus.Cli** handles commands and paths; **Citrus.Tests** verifies behaviour.
 
 Live adapters and optimisation/walk-forward remain future releases. **Citrus.Desktop** provides the initial Windows GUI.
@@ -265,4 +263,4 @@ dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore -- --
 
 The benchmark uses 100 symbols, 20 substrategies, SMA calculations, and 2,000 initial orders. It measures engine execution, excluding data generation. Initial Windows/.NET 10 measurements: 365,000 daily bars in 15.978 seconds (205 MiB process peak), and 1,752,000 hourly bars in 70.822 seconds (764 MiB process peak). Memory is the process high-water mark, including dataset generation; these are observations, not hardware-independent limits.
 
-GitHub Actions is configured to build, run offline tests, and generate data, validate, execute and replay the Demo backtest on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.
+GitHub Actions is configured to build, run offline tests, and generate data, validate and execute the Demo backtest on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.
