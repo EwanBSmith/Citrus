@@ -12,7 +12,6 @@ public sealed class ZorroPortfolio : DailyStrategy
     private (double Date, double Close)[] vix = [], vix3m = [];
     private readonly List<double> volatility = [], ratios = [];
     private double? ema, previousRatio, previousEma;
-    protected override string ClockSymbol => "SCHB";
     protected override int WarmupBars => 91;
 
     /// <summary>Fixes the portfolio's starting cash, daily bars and borrowing model in strategy code.</summary>

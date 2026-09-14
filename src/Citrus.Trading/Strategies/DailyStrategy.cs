@@ -8,13 +8,11 @@ public abstract class DailyStrategy : IStrategy
     /// <summary>Declares authoritative settings before historical data or accounts are created.</summary>
     protected virtual void Configure(StrategyOptions options) { }
     private IStrategyContext? context;
-    private Instrument? clock;
-    private DateTimeOffset? lastClose;
+    private HashSet<(DateTimeOffset Open, DateTimeOffset Close)> sessions = [];
     private bool initializing;
     private const string AuctionEvent = "Citrus.DailyStrategy.BeforeClose";
+    private const string CloseEvent = "Citrus.DailyStrategy.OnClose";
 
-    /// <summary>Selects the symbol whose completed session bars trigger OnClose.</summary>
-    protected abstract string ClockSymbol { get; }
     /// <summary>Gets the number of completed bars required by entry and notional-target helpers; exits remain available.</summary>
     protected virtual int WarmupBars => 0;
     /// <summary>Gets the underlying API for advanced orders, history, scheduling, and external data.</summary>
@@ -31,38 +29,39 @@ public abstract class DailyStrategy : IStrategy
         return new(Context, name, allocation, WarmupBars, symbols);
     }
 
-    /// <summary>Resets run state, initializes accounts, and schedules callbacks one minute before each eligible close.</summary>
+    /// <summary>Resets run state, initializes accounts, and schedules callbacks at and one minute before each eligible market close.</summary>
     void IStrategy.OnStart(IStrategyContext context)
     {
         this.context = context;
-        lastClose = null;
-        clock = context.ResolveInstrument(ClockSymbol);
-        if (clock.AssetClass != AssetClass.Equity || context.Sessions.Count == 0)
-            throw new InvalidOperationException("DailyStrategy requires an equity clock and an exchange session calendar.");
+        if (context.Sessions.Count == 0)
+            throw new InvalidOperationException("DailyStrategy requires a market session calendar.");
+        sessions = context.Sessions.Select(session => (session.Open, session.Close)).ToHashSet();
         ArgumentOutOfRangeException.ThrowIfNegative(WarmupBars);
         initializing = true;
         try { Initialize(); }
         finally { initializing = false; }
         foreach (var session in context.Sessions)
         {
+            if (session.Close > context.Time) context.Schedule(session.Close, CloseEvent);
             var time = session.Close.AddMinutes(-1);
             if (time > context.Time && time >= session.Open) context.Schedule(time, AuctionEvent);
         }
     }
 
-    /// <summary>Dispatches the clock's completed daily session once; partial session bars are not supported.</summary>
+    /// <summary>Rejects bars that do not span a complete session of the strategy's single equity market.</summary>
     void IStrategy.OnBar(IStrategyContext context, IReadOnlyList<Bar> bars)
     {
-        if (!bars.Any(b => b.Instrument == clock && b.SessionClose) || lastClose == context.Time) return;
-        if (bars.Any(b => b.SessionClose && !b.SessionOpen)) throw new InvalidOperationException("DailyStrategy requires daily session bars.");
-        lastClose = context.Time;
-        OnClose();
+        if (bars.Any(bar => bar.Instrument.AssetClass != AssetClass.Equity || !bar.SessionOpen || !bar.SessionClose
+            || !sessions.Contains((bar.OpenTime, bar.CloseTime))))
+            throw new InvalidOperationException("DailyStrategy requires daily equity bars matching the market session calendar.");
     }
 
-    /// <summary>Dispatches the reserved auction callback or forwards a user-scheduled event.</summary>
+    /// <summary>Dispatches market-session callbacks or forwards a user-scheduled event.</summary>
     void IStrategy.OnScheduled(IStrategyContext context, string name)
     {
-        if (name == AuctionEvent) BeforeClose(); else OnScheduled(name);
+        if (name == AuctionEvent) BeforeClose();
+        else if (name == CloseEvent) OnClose();
+        else OnScheduled(name);
     }
     /// <summary>Forwards order notifications after the engine updates order state.</summary>
     void IStrategy.OnOrderUpdate(IStrategyContext context, OrderUpdate update) => OnOrderUpdate(update);
@@ -73,7 +72,7 @@ public abstract class DailyStrategy : IStrategy
 
     /// <summary>Creates accounts and resets strategy-owned indicators at the beginning of every run.</summary>
     protected abstract void Initialize();
-    /// <summary>Evaluates the completed daily bar; market orders remain eligible only at a subsequent open.</summary>
+    /// <summary>Evaluates the market close after all bars closing at that time have entered history; market orders remain eligible only at a subsequent open.</summary>
     protected virtual void OnClose() { }
     /// <summary>Runs one minute before a session close using only previously completed bars; request MarketOnClose explicitly.</summary>
     protected virtual void BeforeClose() { }

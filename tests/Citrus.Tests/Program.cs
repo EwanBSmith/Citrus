@@ -9,6 +9,7 @@ using Citrus.Simulation;
 
 // Keep regression checks offline and package-free; named actions are executed by the runner below.
 var tests = new List<(string Name, Action Test)>();
+DailyStrategyTests.Register((name, action) => tests.Add((name, action)));
 BuiltInStrategyTests.Register((name, action) => tests.Add((name, action)));
 StrategyConfigurationTests.Register((name, action) => tests.Add((name, action)));
 BacktestRunnerTests.Register((name, action) => tests.Add((name, action)));
@@ -1021,8 +1022,7 @@ sealed class NotificationStrategy(Instrument instrument) : IStrategy
 internal sealed class AuctionFixture : DailyStrategy
 {
     private StrategyAccount account = null!;
-    protected override string ClockSymbol => "SCHB";
-    /// <summary>Allocates the test account and binds the clock symbol case-insensitively.</summary>
+    /// <summary>Allocates the test account and binds its traded symbol case-insensitively.</summary>
     protected override void Initialize() => account = Account("daily", 810, "schb");
     /// <summary>Submits an entry before the early November auction.</summary>
     protected override void BeforeClose()

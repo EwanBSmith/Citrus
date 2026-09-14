@@ -14,7 +14,7 @@ The first release focuses on the backtesting engine and C# strategy development 
 
 ### 2.2 Strategy development
 
-A user writes a strategy as C# source code. A strategy may contain one or more substrategies and may operate across one or more symbols. Strategies are compiled as part of Citrus.Strategies when building Citrus; runtime project, assembly, and source-file loading are unsupported.
+A user writes a strategy as C# source code. A strategy may contain one or more substrategies and may operate across one or more symbols in a single market. Daily strategy callbacks shall follow that market's shared session calendar without selecting a clock instrument. Strategies are compiled as part of Citrus.Strategies when building Citrus; runtime project, assembly, and source-file loading are unsupported.
 
 The GUI uses WPF and XAML on Windows, with a classic desktop workbench layout. A user selects a built-in strategy, configures and starts backtests, and analyses results. Strategy editing takes place in the main solution in an IDE. Views shall support the Visual Studio XAML Designer without loading user settings, historical datasets, or strategy assemblies. The cross-platform requirement applies to the engine and CLI, not the GUI.
 

@@ -119,7 +119,7 @@ The Demo backtest runs `Citrus.Strategies.DemoHold` against seeded synthetic BTC
 
 ## Concise strategy API
 
-For daily equity portfolios, derive from `DailyStrategy`. Declare a `ClockSymbol`, create accounts in `Initialize`, and write rules in `OnClose` or `BeforeClose`. The base class handles symbol binding, session scheduling and callback dispatch. For example:
+For daily equity portfolios, derive from `DailyStrategy`. Create accounts in `Initialize`, and write rules in `OnClose` or `BeforeClose`. Each strategy runs against a single market. The dataset supplies that market's session calendar, which drives callbacks independently of any instrument. The base class handles symbol binding, session scheduling and callback dispatch. For example:
 
 ```csharp
 using System;
@@ -128,7 +128,6 @@ using Citrus.Trading;
 public sealed class ThursdayGold : DailyStrategy
 {
     private StrategyAccount gold = null!;
-    protected override string ClockSymbol => "GLDM";
 
     protected override void Initialize()
         => gold = Account("GoldSeason", 1256, "GLDM");
@@ -148,7 +147,7 @@ public sealed class ThursdayGold : DailyStrategy
 
 Override `WarmupBars` to delay entry and nonzero notional-target helpers until that instrument has enough completed bars. Callbacks still run during warmup so indicators can initialize; exits and explicit quantity orders remain available. `market.History(count)`, `market.HasHistory(count)`, `market.Close` and `market.Midpoint` expose completed data without repeating context/instrument arguments.
 
-`OnClose` runs once for each completed daily session of `ClockSymbol`; market orders fill at a subsequent open. `BeforeClose` runs one minute before each supplied session close, including early closes, and can submit an explicit `MarketOnClose` order (day-only by default). Neither hook can see an unfinished bar. `Time` and `Date` are UTC. `DailyStrategy` requires daily equity session bars; for other intervals or instruments use the APIs below. Optional protected `OnFill`, `OnOrderUpdate`, `OnScheduled` and `OnStop` hooks retain notifications and access to `Context`. Reset strategy-owned state in `Initialize` because a strategy instance can be reused.
+`OnClose` runs once at each market session close within the run, after all bars closing at that time are available in history; market orders fill at a subsequent open. `BeforeClose` runs one minute before each supplied session close, including early closes, and can submit an explicit `MarketOnClose` order (day-only by default). Neither hook can see an unfinished bar. `Time` and `Date` are UTC. `DailyStrategy` requires daily equity session bars; for other intervals or instruments use the APIs below. Optional protected `OnFill`, `OnOrderUpdate`, `OnScheduled` and `OnStop` hooks retain notifications and access to `Context`. Reset strategy-owned state in `Initialize` because a strategy instance can be reused.
 
 Derive from `InstrumentStrategy` for one account/instrument. Its constructor registers capital and the host forwards only that instrument's bars to `OnBar(InstrumentContext market, Bar bar)`. For other multi-instrument workflows, use `IStrategy` and construct an `InstrumentContext` for each registered account/instrument during startup.
 
