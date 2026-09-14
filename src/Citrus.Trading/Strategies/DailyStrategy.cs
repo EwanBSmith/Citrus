@@ -8,11 +8,14 @@ public abstract class DailyStrategy : IStrategy
     /// <summary>Declares authoritative settings before historical data or accounts are created.</summary>
     protected virtual void Configure(StrategyOptions options) { }
     private IStrategyContext? context;
+    private TradingCalendar? calendar;
     private HashSet<(DateTimeOffset Open, DateTimeOffset Close)> sessions = [];
     private bool initializing;
     private const string AuctionEvent = "Citrus.DailyStrategy.BeforeClose";
     private const string CloseEvent = "Citrus.DailyStrategy.OnClose";
 
+    /// <summary>Gets the market time zone used for session dates and monthly trading-day counts.</summary>
+    protected virtual TimeZoneInfo ExchangeTimeZone => TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
     /// <summary>Gets the number of completed bars required by entry and notional-target helpers; exits remain available.</summary>
     protected virtual int WarmupBars => 0;
     /// <summary>Gets the underlying API for advanced orders, history, scheduling, and external data.</summary>
@@ -21,6 +24,16 @@ public abstract class DailyStrategy : IStrategy
     protected DateTimeOffset Time => Context.Time;
     /// <summary>Gets the UTC date of the current callback.</summary>
     protected DateOnly Date => DateOnly.FromDateTime(Time.UtcDateTime);
+
+    /// <summary>Returns the latest opened market session shifted by signed sessions; requires complete calendar months.</summary>
+    protected TradingDay? TradingDay(int offset = 0) => (calendar ?? throw new InvalidOperationException("The strategy has not started."))
+        .TradingDay(Time, offset);
+    /// <summary>Returns the current market session's one-based trading-day ordinal, excluding exchange holidays.</summary>
+    protected int TradingDayOfMonth() => TradingDay()?.DayOfMonth
+        ?? throw new InvalidOperationException("No market session has opened yet.");
+    /// <summary>Returns the number of supplied market sessions in the current session's month; supply complete months even for short backtests.</summary>
+    protected int TradingDaysInMonth() => TradingDay()?.DaysInMonth
+        ?? throw new InvalidOperationException("No market session has opened yet.");
 
     /// <summary>Registers an account whose allocation is both its initial capital and default fixed entry notional.</summary>
     protected StrategyAccount Account(string name, decimal allocation, params string[] symbols)
@@ -35,6 +48,7 @@ public abstract class DailyStrategy : IStrategy
         this.context = context;
         if (context.Sessions.Count == 0)
             throw new InvalidOperationException("DailyStrategy requires a market session calendar.");
+        calendar = new TradingCalendar(context.Sessions, ExchangeTimeZone);
         sessions = context.Sessions.Select(session => (session.Open, session.Close)).ToHashSet();
         ArgumentOutOfRangeException.ThrowIfNegative(WarmupBars);
         initializing = true;

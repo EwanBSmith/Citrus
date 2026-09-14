@@ -23,7 +23,9 @@ public sealed class ZorroPortfolio : DailyStrategy
         options.ShortsAvailable = true;
     }
 
-    /// <summary>Uses the source account and asset ordering, with natural gas disabled.</summary>
+    /// <summary>
+    /// Uses the source account and asset ordering, with natural gas disabled.
+    /// </summary>
     protected override void Initialize()
     {
         payday = Account("PaydaySeason", 810, "SCHB");
@@ -39,12 +41,13 @@ public sealed class ZorroPortfolio : DailyStrategy
         volatility.Clear(); ratios.Clear(); ema = previousRatio = previousEma = null;
     }
 
-    /// <summary>Evaluates completed daily-bar signals; market orders become eligible at the next open.</summary>
+    /// <summary>
+    /// Evaluates completed daily-bar signals; market orders become eligible at the next open.
+    /// </summary>
     protected override void OnClose()
     {
-        var date = Date;
-        var tdm = Enumerable.Range(1, date.Day).Count(d => CalendarDay(new(date.Year, date.Month, d)));
-        var tom = Enumerable.Range(1, DateTime.DaysInMonth(date.Year, date.Month)).Count(d => CalendarDay(new(date.Year, date.Month, d)));
+        var tdm = TradingDayOfMonth();
+        var tom = TradingDaysInMonth();
         var spot = IndexClose(vix, Time); var term = IndexClose(vix3m, Time);
         EqBondReversion(tdm, tom, beforeClose: false);
         VIXHedge();
@@ -144,8 +147,8 @@ public sealed class ZorroPortfolio : DailyStrategy
     {
         if (!payday["SCHB"].HasHistory(90)) return;
         var date = Date;
-        var tdm = Enumerable.Range(1, date.Day).Count(d => CalendarDay(new(date.Year, date.Month, d)));
-        var tom = Enumerable.Range(1, DateTime.DaysInMonth(date.Year, date.Month)).Count(d => CalendarDay(new(date.Year, date.Month, d)));
+        var tdm = TradingDayOfMonth();
+        var tom = TradingDaysInMonth();
         PaydaySeason(tdm, tom);
         GoldSeason(date);
         BondSeason(tdm, tom);
@@ -183,9 +186,6 @@ public sealed class ZorroPortfolio : DailyStrategy
         if (Holiday(WeekdayOffset(date, 1))) oil["UGA"].EnterShort(OrderType.MarketOnClose);
         if (Holiday(WeekdayOffset(date, -1))) oil["UGA"].ExitShort(OrderType.MarketOnClose);
     }
-
-    /// <summary>Uses Zorro's unconfigured global Holidays array, separately from the oil helper.</summary>
-    private static bool CalendarDay(DateOnly d) => d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) && !(d.Month == 1 && d.Day == 1 || d.Month == 12 && d.Day == 25);
 
     /// <summary>Shifts dates by weekdays, counting holidays as weekdays.</summary>
     private static DateOnly WeekdayOffset(DateOnly d, int n)

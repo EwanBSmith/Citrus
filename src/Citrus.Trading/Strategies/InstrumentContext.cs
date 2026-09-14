@@ -3,7 +3,7 @@ namespace Citrus.Trading;
 /// <summary>Binds calendar, sizing, and order helpers to one instrument and registered substrategy. Multi-instrument strategies can construct one per account/instrument.</summary>
 public sealed class InstrumentContext
 {
-    private readonly Lazy<TradingDay[]> calendar;
+    private readonly Lazy<TradingCalendar> calendar;
     /// <summary>Gets the complete underlying API for scheduling, portfolio access, and advanced orders.</summary>
     public IStrategyContext Context { get; }
     /// <summary>Gets the instrument used by this context.</summary>
@@ -87,7 +87,7 @@ public sealed class InstrumentContext
         Substrategy = substrategy;
         Instrument = context.ResolveInstrument(instrument.Symbol);
         if (Instrument.AssetClass != instrument.AssetClass) throw new ArgumentException($"Asset class does not match history for {instrument.Symbol}.");
-        calendar = new Lazy<TradingDay[]>(() => BuildCalendar(exchangeZone ?? TimeZoneInfo.FindSystemTimeZoneById("America/New_York")));
+        calendar = new Lazy<TradingCalendar>(() => new TradingCalendar(Context.Sessions, exchangeZone));
     }
 
     /// <summary>Binds a symbol directly; venue and asset-class metadata come from the historical dataset.</summary>
@@ -95,21 +95,7 @@ public sealed class InstrumentContext
         : this(context, substrategy, context.ResolveInstrument(symbol), exchangeZone) { }
 
     /// <summary>Returns the latest opened session shifted by signed trading sessions (1 is next); null outside coverage or before the first open. Requires complete calendar months.</summary>
-    public TradingDay? TradingDay(int offset = 0)
-    {
-        var days = calendar.Value;
-        var low = 0;
-        var high = days.Length - 1;
-        while (low <= high)
-        {
-            var middle = low + (high - low) / 2;
-            if (days[middle].Session.Open <= Context.Time) low = middle + 1;
-            else high = middle - 1;
-        }
-        if (high < 0) return null;
-        var index = (long)high + offset;
-        return index >= 0 && index < days.Length ? days[(int)index] : null;
-    }
+    public TradingDay? TradingDay(int offset = 0) => calendar.Value.TradingDay(Context.Time, offset);
 
     /// <summary>Buys an additional positive quantity with the requested execution type and optional limit price.</summary>
     public long Buy(decimal quantity, OrderType type = OrderType.Market, TimeInForce timeInForce = TimeInForce.GoodTillCancelled, decimal? limitPrice = null)
@@ -167,16 +153,5 @@ public sealed class InstrumentContext
         foreach (var order in Context.OpenOrders.Where(o => o.Request.Substrategy == Substrategy && o.Request.Instrument == Instrument).ToArray())
             if (Context.Cancel(order.OrderId)) count++;
         return count;
-    }
-
-    /// <summary>Indexes session ordinals using exchange-local months; future information is limited to calendar times.</summary>
-    private TradingDay[] BuildCalendar(TimeZoneInfo zone)
-    {
-        if (Context.Sessions.Count == 0) throw new InvalidOperationException("Trading-day queries require a complete exchange session calendar.");
-        return Context.Sessions.OrderBy(s => s.Open)
-            .Select(s => (Session: s, Date: DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(s.Open, zone).DateTime)))
-            .GroupBy(s => (s.Date.Year, s.Date.Month))
-            .SelectMany(month => month.Select((s, i) => new TradingDay(s.Session, s.Date, i + 1, month.Count())))
-            .ToArray();
     }
 }

@@ -595,6 +595,34 @@ MarketDataset PaydayData(decimal price = 100m)
     }
     return new() { Sessions = sessions, Bars = sessions.Select(s => new Bar(schb, s.Open, s.Close, price, price, price, price, 10000, true, true)).ToList() };
 }
+Test("Daily trading-day functions use full market months across holidays and a sliced run", () =>
+{
+    var full = PaydayData();
+    var selected = new[] { new DateOnly(2024, 11, 27), new DateOnly(2024, 11, 29), new DateOnly(2024, 12, 2) };
+    var data = full with { Bars = full.Bars.Where(bar => selected.Contains(DateOnly.FromDateTime(bar.OpenTime.UtcDateTime))).ToList() };
+    var strategy = new MonthlyCalendarFixture();
+    Run(strategy, data);
+    var expected = new[] { (selected[0], 19, 20), (selected[1], 20, 20), (selected[2], 1, 21) };
+    True(strategy.Before.SequenceEqual(expected), "Pre-close counts used bars or weekdays instead of the full market calendar.");
+    True(strategy.Closes.SequenceEqual(expected), "Monthly counts changed between pre-close and close.");
+});
+Test("Shared trading calendar uses exchange-local months and snapshots its sessions", () =>
+{
+    var zone = TimeZoneInfo.CreateCustomTimeZone("fixture", TimeSpan.FromHours(2), "fixture", "fixture");
+    var first = DateTimeOffset.Parse("2024-01-31T23:30:00Z");
+    var sessions = new List<MarketSession> { new(first, first.AddHours(1)), new(first.AddDays(1), first.AddDays(1).AddHours(1)) };
+    var calendar = new TradingCalendar(sessions, zone);
+    sessions.Add(new(first.AddDays(2), first.AddDays(2).AddHours(1)));
+    Equal(new DateOnly(2024, 2, 1), calendar.TradingDay(first)!.Date);
+    Equal(1, calendar.TradingDayOfMonth(first));
+    Equal(2, calendar.TradingDaysInMonth(first));
+    True(calendar.TradingDay(first.AddTicks(-1)) is null);
+    True(calendar.TradingDayOfMonth(first.AddTicks(-1)) is null);
+    True(calendar.TradingDaysInMonth(first.AddTicks(-1)) is null);
+    Equal(2, calendar.TradingDay(first, 1)!.DayOfMonth);
+    True(calendar.TradingDay(first, int.MaxValue) is null);
+    Throws<InvalidOperationException>(() => new TradingCalendar([]));
+});
 Test("Payday fixture trades exact sessions and early month-end closes across months", () =>
 {
     var strategy = new PaydaySeasonality();
@@ -672,6 +700,21 @@ Test("Source portfolio uses pre-close calendar auctions and next-open price sign
     True(result.Final.Positions.Any(p => p.Substrategy == "GoldSeason" && p.Quantity > 0));
     var repeated = new BacktestEngine().Run(strategy, data, config);
     True(result.Fills.SequenceEqual(repeated.Fills));
+});
+Test("Zorro monthly entries count actual market sessions around exchange holidays", () =>
+{
+    var full = ZorroData();
+    var holiday = new DateOnly(2024, 7, 4);
+    var data = full with
+    {
+        Sessions = full.Sessions.Where(session => DateOnly.FromDateTime(session.Open.UtcDateTime) != holiday).ToList(),
+        Bars = full.Bars.Where(bar => DateOnly.FromDateTime(bar.OpenTime.UtcDateTime) != holiday).ToList()
+    };
+    var result = new BacktestEngine().Run(new ZorroPortfolio(), data, Config());
+    var entries = result.Orders.Where(order => order.Status == OrderStatus.Accepted
+        && order.Request.Substrategy == "PaydaySeason" && order.Request.Quantity > 0 && order.Time.Month == 7).ToArray();
+    True(entries.Any(order => order.Time.Day == 11), "The eighth session after the July 4 closure was not used.");
+    True(entries.All(order => order.Time.Day != 10), "The old weekday count still triggered the eighth-day entry.");
 });
 Test("Source portfolio decisions do not depend on unobserved closing prices", () =>
 {
@@ -1029,4 +1072,17 @@ internal sealed class AuctionFixture : DailyStrategy
     {
         if (Date.Day == 29) account["SCHB"].EnterLong(OrderType.MarketOnClose);
     }
+}
+
+/// <summary>Observes monthly session counts through the instrument-independent daily API.</summary>
+internal sealed class MonthlyCalendarFixture : DailyStrategy
+{
+    public List<(DateOnly Date, int Day, int Total)> Before { get; } = [];
+    public List<(DateOnly Date, int Day, int Total)> Closes { get; } = [];
+    /// <summary>Clears observations when the strategy is reused.</summary>
+    protected override void Initialize() { Before.Clear(); Closes.Clear(); }
+    /// <summary>Records the full market month's counts before its session closes.</summary>
+    protected override void BeforeClose() => Before.Add((TradingDay()!.Date, TradingDayOfMonth(), TradingDaysInMonth()));
+    /// <summary>Records the same market counts after the session closes.</summary>
+    protected override void OnClose() => Closes.Add((TradingDay()!.Date, TradingDayOfMonth(), TradingDaysInMonth()));
 }
