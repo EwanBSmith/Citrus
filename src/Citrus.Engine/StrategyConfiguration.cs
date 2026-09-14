@@ -61,7 +61,7 @@ public static class StrategyConfiguration
     /// <summary>Rejects invalid effective capital, interval, time boundaries and execution settings before data is loaded.</summary>
     public static void Validate(RunConfiguration configuration)
     {
-        StrategyFolder.Validate(configuration);
+
         if (configuration.SchemaVersion != 1 || configuration.InitialCash <= 0) throw new ArgumentException("Initial cash must be positive and the configuration schema must be supported.");
         if (configuration.Interval is null || configuration.Interval.Minutes <= 0 || string.IsNullOrWhiteSpace(configuration.Interval.Name))
             throw new ArgumentException("Strategy interval must have a name and positive duration.");

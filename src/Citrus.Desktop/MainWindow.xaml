@@ -30,7 +30,7 @@
     <MenuItem Header="_Run backtest" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Run" InputGestureText="F5"/>
     <MenuItem Header="Open results _folder" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="Results" InputGestureText=""/>
    </MenuItem>
-   <MenuItem Header="_Data" Click="MenuItem_Click">
+   <MenuItem Header="_Data">
     <MenuItem Header="_Historical data…" Command="{x:Static local:WorkbenchCommands.Action}" CommandParameter="History" InputGestureText=""/>
    </MenuItem>
    <MenuItem Header="_Settings">
@@ -74,11 +74,11 @@
        </DockPanel>
        <TextBlock x:Name="catalogStatus" Text="Loading strategies..." TextWrapping="Wrap" Margin="0,0,0,8"/>
        <ListBox x:Name="strategies" Height="180" Margin="0,0,0,16" SelectionChanged="StrategyChanged" AutomationProperties.Name="Strategies"/>
-       <TextBlock Text="Open your strategy solution in Visual Studio or Rider to edit, test and debug. Save your code in the IDE before validating or running a backtest." TextWrapping="Wrap" Margin="0,0,0,16"/>
+       <TextBlock Text="Open your strategy solution in Visual Studio or Rider to edit, test and debug. Rebuild Citrus and restart the application after code changes." TextWrapping="Wrap" Margin="0,0,0,16"/>
                             </StackPanel></ScrollViewer>
      </TabItem>
      <TabItem x:Name="configPage" Header="Configuration">
-      <DockPanel><TextBlock DockPanel.Dock="Top" Text="Paths are relative to the strategy folder. Rates and margins use fractions: 0.05 = 5%." Margin="8" TextWrapping="Wrap"/>
+      <DockPanel><TextBlock DockPanel.Dock="Top" Text="Output paths are relative to the configuration file. Rates and margins use fractions: 0.05 = 5%." Margin="8" TextWrapping="Wrap"/>
        <local:ConfigurationEditor x:Name="configEditor"/>
       </DockPanel>
      </TabItem>

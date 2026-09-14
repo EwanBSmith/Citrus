@@ -39,32 +39,22 @@ internal static class StrategyConfigurationTests
             ExpectFailure(() => new BacktestEngine().Run(strategy, Data(), new()));
             Require(!strategy.Started, "An invalid strategy configuration reached OnStart.");
         });
-        test("Compiled source declarations and exported manifests use the same effective settings", () =>
+        test("Strategy declarations and exported manifests use the same effective settings", () =>
         {
             var root = Path.Combine(Path.GetTempPath(), "citrus-options-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
-            var source = Path.Combine(root, "Strategy.cs");
-            File.WriteAllText(source, """
-                using Citrus.Trading;
-                public sealed class Strategy : IStrategy
-                {
-                    public void Configure(StrategyOptions options) { options.InitialCash = 4321; options.Interval = BarInterval.Hourly; }
-                }
-                """);
-            var path = Path.Combine(root, "run.json");
-            var requested = new RunConfiguration { Strategy = "Strategy.cs", InitialCash = 12 };
-            Json.Write(path, requested);
-            using var compiled = CompiledStrategy.LoadConfiguration(path, requested);
-            var effective = compiled.EffectiveConfiguration(requested);
+            var requested = new RunConfiguration { InitialCash = 12 };
+            var strategy = new OptionsFixture();
+            var effective = StrategyConfiguration.Resolve(strategy, requested);
             var data = Data();
-            var result = new BacktestEngine().Run(compiled.Strategy, data, requested);
+            var result = new BacktestEngine().Run(strategy, data, requested);
             var dataPath = Path.Combine(root, "historical-data.json");
             Json.Write(dataPath, data);
-            Reports.Export(root, result, requested, data, compiled.InputPath, dataPath, compiled.DependencyHashes, compiled);
+            Reports.Export(root, result, requested, data, strategy.GetType().Assembly.Location, dataPath, BuiltInStrategies.ComponentHashes(), strategy);
             using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "manifest.json")));
-            Require(result.Final.Equity == 4321 && effective.InitialCash == 4321 &&
-                manifest.RootElement.GetProperty("configuration").GetProperty("initialCash").GetDecimal() == 4321 &&
-                manifest.RootElement.GetProperty("strategyOptions").GetProperty("InitialCash").GetDecimal() == 4321,
+            Require(result.Final.Equity == 2500 && effective.InitialCash == 2500 &&
+                manifest.RootElement.GetProperty("configuration").GetProperty("initialCash").GetDecimal() == 2500 &&
+                manifest.RootElement.GetProperty("strategyOptions").GetProperty("InitialCash").GetDecimal() == 2500,
                 "Captured configuration differs from execution or declarations.");
         });
     }

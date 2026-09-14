@@ -1,6 +1,6 @@
 # Desktop development
 
-Citrus.Desktop is a WPF application targeting .NET 10 on Windows. Its launch path, strategy folders, JSON configuration, historical cache, and report formats are shared with the existing engine and CLI. The desktop project references ScottPlot.WPF; it does not host Windows Forms controls.
+Citrus.Desktop is a WPF application targeting .NET 10 on Windows. Its launch path, built-in strategies, JSON configuration, historical cache, and report formats are shared with the existing engine and CLI. The desktop project references ScottPlot.WPF; it does not host Windows Forms controls.
 
 ## Opening the designer
 
@@ -21,11 +21,11 @@ Keep layout edits in the XAML files. Do not edit the generated files under obj, 
 
 App.xaml owns shared styles and App.xaml.cs starts the WPF dispatcher. MainWindow coordinates workspace views and runs Citrus.Engine's synchronous BacktestRunner.Run method on a background thread. The CLI uses the same service for execution and replay. Its configuration callback runs before historical data loading; MainWindow marshals that notification to the dispatcher to update effective values and locked fields. BacktestWorkspace creates offline examples and parses configuration text. ConfigurationEditor applies only changed fields to the original configuration so opening and saving does not round values or change optional dates. ResultTable builds typed, flattened tables with up to 5,000 rows for display; exports retain every row. MainWindow owns table binding and disposal. Result columns bind literal DataRowView descriptors, including names containing periods.
 
-## External strategy integration
+## Built-in strategy integration
 
-MainWindow builds Citrus.Strategies after Loaded and lists public, concrete strategy types with parameterless constructors without instantiating them. StrategyCatalog locates the checkout and associates full type names with named backtests; new types receive separate configurations. Refresh rebuilds discovery, and selection reloads authoritative C# settings. MainWindow opens the selected solution/project through Windows file associations. ConfigurationEditor preserves project, assembly, type and solution settings. Opening a workspace, validation and runs call CompiledStrategy.LoadConfiguration on a background thread. StrategyConfiguration freezes Configure assignments and applies them before loading historical data. ConfigurationEditor displays effective values and disables explicitly assigned fields; output and strategy-selection fields remain editable. Project builds report diagnostics in the execution log; WPF never owns or saves strategy source.
+MainWindow lists the public, concrete strategy types shipped in Citrus.Strategies without constructing them. StrategyCatalog associates type names with standalone JSON configurations. Installed applications use per-user settings when no checkout is available. Open in IDE opens Citrus.slnx; code changes require rebuilding and restarting Citrus. ConfigurationEditor shows the selected type read-only and edits backtest settings. Validation and execution create fresh built-in instances on a background thread. StrategyConfiguration freezes Configure assignments before historical-data selection, and the editor locks assigned fields. No project builds, source compilation or external assembly loading take place at runtime.
 
-The smoke suite checks source preservation, authoritative field locking and refresh, effective report settings, configuration persistence, result bindings and background backtests. Run:
+The smoke suite checks built-in selection and standalone settings, authoritative field locking and refresh, effective report settings, configuration persistence, result bindings and background backtests. Run:
 
 ```powershell
 dotnet build Citrus.slnx -c Release --no-restore

@@ -1,7 +1,5 @@
 {
   "schemaVersion": 1,
-  "output": "Results/Default",
-  "strategyProject": "src/Citrus.Strategies/Citrus.Strategies.csproj",
-  "strategyType": "ZorroPortfolio",
-  "strategySolution": "Citrus.slnx"
+  "output": "../Results/Default",
+  "strategyType": "ZorroPortfolio"
 }

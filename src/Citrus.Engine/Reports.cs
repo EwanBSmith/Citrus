@@ -45,10 +45,10 @@ public static class Reports
 
     /// <summary>Writes JSON/CSV results, replacing matching output files while retaining unrelated files.</summary>
     public static void Export(string directory, BacktestResult result, RunConfiguration configuration, MarketDataset data,
-        string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes, CompiledStrategy? compiled = null)
+        string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes, IStrategy? strategy = null)
     {
         Directory.CreateDirectory(directory);
-        if (compiled is not null) configuration = compiled.EffectiveConfiguration(configuration);
+        if (strategy is not null) configuration = StrategyConfiguration.Resolve(strategy, configuration);
         var annualDays = data.Bars.Any(b => b.Instrument.AssetClass == AssetClass.LinearPerpetual) ? 365 : 252;
         var summary = new
         {
@@ -89,21 +89,19 @@ public static class Reports
             p.Substrategies.Select(s => new object?[] { p.Time, s.Key, s.Value })));
         // Compute the file SHA-256 digest used to identify captured inputs and runtime components.
         string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
-        var strategyArtifacts = compiled?.ExportArtifacts(directory, configuration);
+        Json.Write(Path.Combine(directory, "run.json"), configuration with { Output = "replay-results" });
         Json.Write(Path.Combine(directory, "manifest.json"), new
         {
             schemaVersion = 1, configuration, configuration.Seed,
             engineVersion = typeof(BacktestEngine).Assembly.GetName().Version?.ToString(),
             engineBuild = typeof(BacktestEngine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
-            strategyBuild = compiled?.Strategy.GetType().Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
+            strategyBuild = strategy?.GetType().Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             engineHash = Hash(typeof(BacktestEngine).Assembly.Location),
-            componentHashes = new[] { typeof(BacktestEngine).Assembly, typeof(Citrus.Simulation.Ledger).Assembly,
-                typeof(Citrus.Data.DatasetValidator).Assembly, typeof(IStrategy).Assembly, typeof(Microsoft.CodeAnalysis.CSharp.CSharpCompilation).Assembly }
-                .ToDictionary(a => a.GetName().Name!, a => Hash(a.Location)),
+            componentHashes = BuiltInStrategies.ComponentHashes(),
             runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
-            strategyHash = Hash(strategyPath), dataHash = Hash(dataPath), dependencyHashes, strategyArtifacts,
-            strategyRevision = compiled?.StrategyRevision, citrusRevision = compiled?.CitrusRevision,
-            strategyOptions = compiled?.Options,
+            strategyHash = Hash(strategyPath), dataHash = Hash(dataPath), dependencyHashes,
+
+            strategyOptions = strategy is null ? null : StrategyConfiguration.Declarations(strategy),
             calendarHash = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(data.Sessions, Json.Options))),
             reproducibility = "Repeatability requires unchanged inputs, engine/runtime, and a deterministic trusted strategy. External I/O and script-owned randomness are untracked.",
             data.Provider, data.Notes

@@ -2,7 +2,7 @@
 
 ## 1 Purpose
 
-Citrus is a cross-platform backtesting and live trading engine. It provides a graphical interface for creating strategies and a command-line interface for deployment. A strategy is defined in a script-like file and may contain multiple substrategies that operate together as a portfolio.
+Citrus is a cross-platform backtesting and live trading engine. It provides a graphical interface for creating strategies and a command-line interface for deployment. A strategy is built into Citrus.Strategies and may contain multiple substrategies that operate together as a portfolio.
 
 The same strategy definition is intended to run in both backtesting and live trading, subject to explicitly identified environment-specific behaviour.
 
@@ -10,13 +10,13 @@ The same strategy definition is intended to run in both backtesting and live tra
 
 ### 2.1 Release progression
 
-The first release focuses on the backtesting engine and file-based C# strategy development. Optimisation, live trading, and the graphical interface are subsequent capabilities. The first graphical interface release will support script editing, backtest execution, and results analysis.
+The first release focuses on the backtesting engine and C# strategy development in Citrus.Strategies. Optimisation, live trading, and the graphical interface are subsequent capabilities. The first graphical interface release will support built-in strategy selection, backtest execution, and results analysis.
 
 ### 2.2 Strategy development
 
-A user writes a strategy as C# source code. A strategy may contain one or more substrategies and may operate across one or more symbols. The initial implementation may compile strategy source code before execution. Its strategy-facing interfaces shall not prevent interpreted C# execution from being added later.
+A user writes a strategy as C# source code. A strategy may contain one or more substrategies and may operate across one or more symbols. Strategies are compiled as part of Citrus.Strategies when building Citrus; runtime project, assembly, and source-file loading are unsupported.
 
-The GUI uses WPF and XAML on Windows, with AvalonEdit for C# strategy editing and a classic desktop workbench layout. A user can edit strategy scripts, configure and start backtests, and analyse results. Views shall support the Visual Studio XAML Designer without loading user settings, historical datasets, or strategy assemblies. The cross-platform requirement applies to the engine and CLI, not the GUI.
+The GUI uses WPF and XAML on Windows, with a classic desktop workbench layout. A user selects a built-in strategy, configures and starts backtests, and analyses results. Strategy editing takes place in the main solution in an IDE. Views shall support the Visual Studio XAML Designer without loading user settings, historical datasets, or strategy assemblies. The cross-platform requirement applies to the engine and CLI, not the GUI.
 
 ### 2.3 Backtesting
 
@@ -36,24 +36,24 @@ A user deploys the same strategy definition through the command-line interface. 
 
 - **UR-PLAT-001** Citrus shall be implemented using .NET.
 - **UR-PLAT-002** Citrus shall support backtesting and live trading.
-- **UR-PLAT-003** Strategies shall live in the main Citrus repository and solution as a C# class-library project. Citrus shall support project builds and prebuilt strategy assemblies; existing file-based scripts remain compatible.
-- **UR-PLAT-003E** The desktop shall discover runnable classes from Citrus.Strategies and offer strategy selection without folder browsing. Selection shall load matching named backtests or create separate settings for a new strategy; refreshing shall rebuild the catalog.
+- **UR-PLAT-003** Strategies shall live in the main Citrus repository and solution as a C# class-library project. Strategies shall be built into Citrus.Strategies with the application; external projects, prebuilt assembly selection, loose scripts, and conventional strategy-folder discovery are unsupported.
+- **UR-PLAT-003E** The desktop shall discover runnable classes from Citrus.Strategies and offer strategy selection without folder browsing. Selection shall load matching named backtests or create separate settings for a new strategy; refreshing shall list the running build; code changes require rebuilding and restarting Citrus.
 - **UR-PLAT-003A** Strategies shall be written in C# against Citrus.Trading.
-- **UR-PLAT-003B** Citrus shall build selected strategy projects in Release before execution, or load explicitly selected prebuilt assemblies.
+- **UR-PLAT-003B** Citrus shall instantiate the named built-in strategy with fresh state for each run. Standalone JSON configurations shall select strategyType and resolve output paths relative to the configuration file.
 - **UR-PLAT-003C** The strategy execution contract shall be independent of the authoring IDE and repository; strategy code shall reference Citrus.Trading.
 - **UR-PLAT-003D** Strategies may declare authoritative run settings in C#. Explicit assignments shall override JSON and GUI settings before data selection and account creation; undeclared settings remain editable. The GUI shall display declared settings read-only and reports shall capture the effective configuration.
 - **UR-PLAT-004** A strategy definition shall run in backtesting and live trading without modification, except for behaviour explicitly selected through runtime context.
-- **UR-PLAT-005** Citrus shall open externally maintained strategy solutions or projects in the associated IDE. Strategy authoring, debugging and source control belong to the external development environment.
+- **UR-PLAT-005** Citrus shall open the main Citrus solution in the associated IDE when the checkout is available. Strategy authoring, debugging and source control belong to the external development environment.
 - **UR-PLAT-006** Citrus shall provide a command-line interface for deployment and execution.
 - **UR-PLAT-007** The Citrus engine and CLI shall run on Windows, macOS, and Linux. The GUI is exempt from this requirement and shall use WPF on Windows, with XAML views for configuration, execution and analysis.
 
 ### 3.2 Release scope
 
-- **UR-SCOPE-001** The first release shall provide the backtesting engine and file-based C# strategy execution.
+- **UR-SCOPE-001** The first release shall provide the backtesting engine and built-in C# strategy execution.
 - **UR-SCOPE-002** Optimisation is not required for the first release but shall remain a planned capability.
 - **UR-SCOPE-003** Live trading is not required for the first release but shall remain a planned capability.
 - **UR-SCOPE-004** The graphical interface is not required for the first release but shall remain a planned capability.
-- **UR-SCOPE-005** The graphical interface shall select external strategy projects, assemblies and concrete strategy types, and open their solutions in an IDE. It shall not contain a source editor.
+- **UR-SCOPE-005** The graphical interface shall select concrete built-in strategy types and open the main Citrus solution in an IDE. It shall not contain a source editor.
 - **UR-SCOPE-006** The first graphical interface release shall allow users to configure and execute backtests.
 - **UR-SCOPE-007** The first graphical interface release shall present backtest results for analysis.
 

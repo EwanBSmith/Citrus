@@ -109,16 +109,19 @@ internal static class DesktopSmokeTest
                 && window.backtests.Items.Count == 1, "Selecting another strategy retained the previous backtests.");
             await CaptureAsync(window, Path.Combine(directory, "strategy-list.png"), 1280, 850);
             var catalogFixture = Path.Combine(directory, "catalog-fixture");
-            var newConfiguration = StrategyCatalog.Configuration(catalogFixture, "New.Strategy");
-            Require(StrategyCatalog.Configuration(catalogFixture, "New.Strategy") == newConfiguration
-                && StrategyFolder.Read(newConfiguration).StrategyType == "New.Strategy", "New strategy settings were not created and reused.");
-            window.LoadConfiguration(StrategyFolder.Root(path)!);
+            Directory.CreateDirectory(catalogFixture);
+            File.WriteAllText(Path.Combine(catalogFixture, "unrelated.json"), "{\"other\":true}");
+            File.WriteAllText(Path.Combine(catalogFixture, "malformed.json"), "{broken");
+            var newConfiguration = StrategyCatalog.Configuration(catalogFixture, "Citrus.Strategies.DemoHold");
+            Require(StrategyCatalog.Configuration(catalogFixture, "Citrus.Strategies.DemoHold") == newConfiguration
+                && RunConfiguration.Read(newConfiguration).StrategyType == "Citrus.Strategies.DemoHold", "New strategy settings were not created and reused.");
+            window.LoadConfiguration(path);
             await window.OptionsReady;
-            window.backtests.Items.Cast<MenuItem>().Single(item => item.Tag as string == "HigherCosts")
+            window.backtests.Items.Cast<MenuItem>().Single(item => Path.GetFileNameWithoutExtension(item.Tag as string) == "HigherCosts")
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             await window.OptionsReady;
             Require(window.configEditor.ReadConfiguration().InitialCash == 75000, "Named backtest selection did not load.");
-            window.backtests.Items.Cast<MenuItem>().Single(item => item.Tag as string == "Default")
+            window.backtests.Items.Cast<MenuItem>().Single(item => Path.GetFileNameWithoutExtension(item.Tag as string) == "Default")
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             await window.OptionsReady;
             window.Present(first);
@@ -134,7 +137,6 @@ internal static class DesktopSmokeTest
 
             window.tabs.SelectedIndex = 0;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            var originalSource = File.ReadAllText(StrategyFolder.Source(path, config));
             window.tabs.SelectedIndex = 1;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             var editor = window.configEditor;
@@ -155,7 +157,6 @@ internal static class DesktopSmokeTest
             Require(!window.strategyPage.IsEnabled, "Strategy actions remained enabled during a backtest.");
             await pending.WaitAsync(TimeSpan.FromSeconds(45));
             Require(Json.Read<RunConfiguration>(path).InitialCash == 125000, "Configuration edits were not saved.");
-            Require(File.ReadAllText(StrategyFolder.Source(path, config)) == originalSource, "The workbench modified externally owned source.");
             Require(before != File.ReadAllText(equityPath), "Updated capital did not affect exported equity.");
             Require(window.strategyPage.IsEnabled && window.menu.IsEnabled && window.configPage.IsEnabled, "Controls were not restored after the run.");
             foreach (var (index, name) in new[] { (0, "strategy"), (1, "configuration"), (4, "fills") })
@@ -166,35 +167,23 @@ internal static class DesktopSmokeTest
                 await CaptureAsync(window, Path.Combine(directory, "desktop-" + name + ".png"), 1280, 850);
                 if (index == 1) await CaptureAsync(window, Path.Combine(directory, "desktop-configuration-compact.png"), 900, 620);
             }
-            // Discover authoritative values on open, preserve editable fields, and refresh after external source edits.
-            var sourcePath = StrategyFolder.Source(path, config);
-            File.WriteAllText(sourcePath, originalSource.Replace("private InstrumentContext market = null!;", """
-                public void Configure(StrategyOptions options)
-                {
-                    options.InitialCash = 54321; options.Seed = 0; options.ShortsAvailable = false;
-                    options.Interval = BarInterval.Daily;
-                }
-                private InstrumentContext market = null!;
-                """));
-            window.LoadConfiguration(path);
+            // Built-in declarations lock only assigned fields, and changing strategies clears those locks.
+            var declaredPath = Path.Combine(directory, "declared.json");
+            Json.Write(declaredPath, config with { StrategyType = "ZorroPortfolio" });
+            window.LoadConfiguration(declaredPath);
             await window.OptionsReady;
-            Require(editor.ReadConfiguration().InitialCash == 54321 && editor.ReadConfiguration().Seed == 0 &&
-                !editor.InitialCash.IsEnabled && !editor.Seed.IsEnabled && !editor.ShortsAvailable.IsEnabled &&
-                editor.Output.IsEnabled && editor.Start.IsEnabled, "Authoritative values were not displayed and locked selectively.");
+            Require(editor.ReadConfiguration().InitialCash == 17000 && !editor.InitialCash.IsEnabled
+                && !editor.Interval.IsEnabled && editor.Seed.IsEnabled && editor.Output.IsEnabled,
+                "Built-in declarations were not displayed and locked selectively.");
             editor.InitialCash.Text = "1";
-            Require(editor.ReadConfiguration().InitialCash == 54321, "A disabled field bypassed strategy authority.");
-            await window.RunAsync();
-            using (var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(first.Output, "manifest.json"))))
-                Require(manifest.RootElement.GetProperty("configuration").GetProperty("initialCash").GetDecimal() == 54321,
-                    "Desktop reports did not capture effective strategy settings.");
+            Require(editor.ReadConfiguration().InitialCash == 17000, "A disabled field bypassed strategy authority.");
             window.tabs.SelectedIndex = 1;
             await CaptureAsync(window, Path.Combine(directory, "strategy-options.png"), 1000, 760);
-            File.WriteAllText(sourcePath, originalSource);
             window.LoadConfiguration(path);
             await window.OptionsReady;
             Require(editor.InitialCash.IsEnabled && editor.Seed.IsEnabled && editor.ShortsAvailable.IsEnabled,
-                "Removing strategy declarations left fields locked.");
-            editor.References.Text = Path.Combine(directory, "missing-strategy-reference.dll");
+                "Changing strategy left fields locked.");
+            editor.LoadConfiguration(config with { StrategyType = "Missing" });
             var failed = false;
             try { await window.RunAsync(); }
             catch (InvalidOperationException) { failed = true; }
@@ -207,7 +196,7 @@ internal static class DesktopSmokeTest
             errorWindow.SetError("Offline fixture error", new IOException("A fixture file could not be opened."));
             await CaptureAsync(errorWindow, Path.Combine(directory, "error-dialog.png"), 820, 480); errorWindow.Close();
 
-            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: WPF rendering, external strategy workflow, settings save/cancel/masking, damaged settings protection, historical library, offline backtests, deterministic replay, output preservation, strict JSON, configuration precision, background execution, result binding, configuration saves and external source preservation and restored controls.");
+            File.WriteAllText(Path.Combine(directory, "smoke-test.txt"), "PASS: WPF rendering, built-in strategy workflow, settings save/cancel/masking, damaged settings protection, historical library, offline backtests, deterministic replay, output preservation, strict JSON, configuration precision, background execution, result binding, configuration saves and restored controls.");
             return 0;
         }
         catch (Exception error)

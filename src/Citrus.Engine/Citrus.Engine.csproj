@@ -3,6 +3,6 @@
     <ProjectReference Include="../Citrus.Trading/Citrus.Trading.csproj" />
     <ProjectReference Include="../Citrus.Simulation/Citrus.Simulation.csproj" />
     <ProjectReference Include="../Citrus.Data/Citrus.Data.csproj" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <ProjectReference Include="../Citrus.Strategies/Citrus.Strategies.csproj" />
   </ItemGroup>
 </Project>

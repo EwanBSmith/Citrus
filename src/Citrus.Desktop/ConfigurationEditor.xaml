@@ -8,26 +8,15 @@
  </UserControl.Resources>
  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
   <StackPanel Margin="16" Grid.IsSharedSizeScope="True">
-   <TextBlock Text="Settings assigned in the strategy's Configure method are read-only. Save C# changes and Validate to refresh them; unassigned settings remain editable." TextWrapping="Wrap" Margin="0,0,0,14"/>
-   <Expander Header="Advanced strategy paths" Padding="12" Margin="0,0,0,14" IsExpanded="False"><StackPanel>
-    <TextBlock Text="Select a project to build, or a prebuilt DLL. Paths are relative to the workspace." TextWrapping="Wrap"/>
-    <Label Content="Strategy project (.csproj)" Target="{Binding ElementName=StrategyProject}"/>
-    <DockPanel><Button Content="Browse…" DockPanel.Dock="Right" Click="BrowseProject"/><TextBox x:Name="StrategyProject" TextChanged="FieldChanged"/></DockPanel>
-    <Label Content="Prebuilt assembly (.dll; leave blank when using a project)" Target="{Binding ElementName=StrategyAssembly}"/>
-    <TextBox x:Name="StrategyAssembly" TextChanged="FieldChanged"/>
-    <Label Content="Strategy class (namespace and type name)" Target="{Binding ElementName=StrategyType}"/>
-    <TextBox x:Name="StrategyType" TextChanged="FieldChanged"/>
-    <Label Content="Solution to open in IDE (optional)" Target="{Binding ElementName=StrategySolution}"/>
-    <DockPanel><Button Content="Browse…" DockPanel.Dock="Right" Click="BrowseSolution"/><TextBox x:Name="StrategySolution" TextChanged="FieldChanged"/></DockPanel>
-   </StackPanel></Expander>
+   <TextBlock Text="Settings assigned in the strategy's Configure method are read-only. Rebuild Citrus and restart after C# changes; unassigned settings remain editable." TextWrapping="Wrap" Margin="0,0,0,14"/>
+   <Label Content="Built-in strategy" Target="{Binding ElementName=StrategyType}"/>
+   <TextBox x:Name="StrategyType" IsReadOnly="True"/>
    <GroupBox Header="Files and output" Padding="12" Margin="0,0,0,14"><Grid>
     <Grid.ColumnDefinitions><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Label Grid.Row="0" Content="Output folder" Target="{Binding ElementName=Output}"/>
     <Grid Grid.Row="0" Grid.Column="1"><DockPanel><Button DockPanel.Dock="Right" Content="Browse…" Click="BrowseOutput" Margin="4"/>
 <TextBox x:Name="Output" TextChanged="FieldChanged" AutomationProperties.Name="Output folder" /></DockPanel></Grid>
-    <Label Grid.Row="1" Content="Assembly references (one per line)" Target="{Binding ElementName=References}"/>
-    <Grid Grid.Row="1" Grid.Column="1"><TextBox x:Name="References" TextChanged="FieldChanged" AutomationProperties.Name="Assembly references (one per line)" AcceptsReturn="True" Height="70" VerticalScrollBarVisibility="Auto"/></Grid>
    </Grid></GroupBox>
    <GroupBox Header="Historical data" Padding="12" Margin="0,0,0,14"><Grid>
     <Grid.ColumnDefinitions><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

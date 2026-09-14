@@ -23,12 +23,8 @@ public partial class ConfigurationEditor : UserControl
         InitializeComponent();
         inputs = new()
         {
-            ["StrategyProject"] = StrategyProject,
-            ["StrategyAssembly"] = StrategyAssembly,
             ["StrategyType"] = StrategyType,
-            ["StrategySolution"] = StrategySolution,
             ["Output"] = Output,
-            ["References"] = References,
             ["Start"] = Start,
             ["End"] = End,
             ["Interval"] = Interval,
@@ -56,7 +52,7 @@ public partial class ConfigurationEditor : UserControl
     {
         if (loading) return;
         var key = inputs.Single(p => ReferenceEquals(p.Value, sender)).Key;
-        if (key is "StrategyProject" or "StrategyAssembly" or "StrategyType" or "References") ClearAuthority();
+        if (key == "StrategyType") ClearAuthority();
         if (authoritative.Contains(key)) return;
         changed.Add(key);
         ConfigurationChanged?.Invoke(this, EventArgs.Empty);
@@ -82,7 +78,7 @@ public partial class ConfigurationEditor : UserControl
             foreach (var (key, input) in inputs)
             {
                 input.IsEnabled = !authoritative.Contains(key);
-                if (authoritative.Contains(key)) input.ToolTip = "Defined in strategy C#; edit Configure and validate again to refresh.";
+                if (authoritative.Contains(key)) input.ToolTip = "Defined in strategy C#; edit Configure, rebuild Citrus and restart to refresh.";
                 var (owner, property) = Property(configuration, key);
                 var value = property.GetValue(owner);
                 switch (input)
@@ -133,7 +129,7 @@ public partial class ConfigurationEditor : UserControl
                 {
                     CheckBox check => check.IsChecked == true,
                     ComboBox combo => combo.SelectedItem,
-                    TextBox when key == "References" => ReadReferences(),
+
                     TextBox text => ParseField(text.Text, property.PropertyType),
                     _ => throw new InvalidOperationException("Unsupported setting: " + key)
                 };
@@ -145,9 +141,6 @@ public partial class ConfigurationEditor : UserControl
             node[parts[^1]] = JsonSerializer.SerializeToNode(value);
         }
         var result = root.Deserialize<RunConfiguration>()!;
-        if ((changed.Contains("StrategyProject") || changed.Contains("StrategyAssembly")) &&
-            (!string.IsNullOrWhiteSpace(result.StrategyProject) || !string.IsNullOrWhiteSpace(result.StrategyAssembly)))
-            result = result with { Strategy = null };
         if (validate) StrategyConfiguration.Validate(result);
         return result;
     }
@@ -163,35 +156,13 @@ public partial class ConfigurationEditor : UserControl
         return text;
     }
 
-    /// <summary>Reads assembly references independently of incomplete numeric settings for live analysis.</summary>
-    internal string[] ReadReferences() => References.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-        .Where(line => !string.IsNullOrWhiteSpace(line)).Select(line => line.Trim()).ToArray();
-
     /// <summary>Selects an output directory and stores its path relative to the strategy workspace.</summary>
     private void BrowseOutput(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "Select output folder" };
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
         Output.Text = ConfigurationPath is null ? dialog.FolderName : Path.GetRelativePath(
-            StrategyFolder.Root(ConfigurationPath) ?? Path.GetDirectoryName(ConfigurationPath)!, dialog.FolderName);
+            Path.GetDirectoryName(ConfigurationPath)!, dialog.FolderName);
     }
 
-    /// <summary>Selects an external C# project and clears a previous assembly selection.</summary>
-    private void BrowseProject(object sender, RoutedEventArgs e)
-    {
-        BrowseStrategyFile(StrategyProject, "C# project (*.csproj)|*.csproj");
-        if (!string.IsNullOrWhiteSpace(StrategyProject.Text)) StrategyAssembly.Clear();
-    }
-
-    /// <summary>Selects the solution that the workbench opens in the associated IDE.</summary>
-    private void BrowseSolution(object sender, RoutedEventArgs e) => BrowseStrategyFile(StrategySolution, "Solution (*.slnx;*.sln)|*.slnx;*.sln");
-
-    /// <summary>Stores an external development file relative to the current strategy workspace.</summary>
-    private void BrowseStrategyFile(TextBox field, string filter)
-    {
-        var dialog = new OpenFileDialog { Filter = filter };
-        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
-        field.Text = ConfigurationPath is null ? dialog.FileName : Path.GetRelativePath(
-            StrategyFolder.Root(ConfigurationPath) ?? Path.GetDirectoryName(ConfigurationPath)!, dialog.FileName);
-    }
 }

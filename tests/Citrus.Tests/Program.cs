@@ -9,7 +9,7 @@ using Citrus.Simulation;
 
 // Keep regression checks offline and package-free; named actions are executed by the runner below.
 var tests = new List<(string Name, Action Test)>();
-ExternalStrategyTests.Register((name, action) => tests.Add((name, action)));
+BuiltInStrategyTests.Register((name, action) => tests.Add((name, action)));
 StrategyConfigurationTests.Register((name, action) => tests.Add((name, action)));
 BacktestRunnerTests.Register((name, action) => tests.Add((name, action)));
 var instrument = new Instrument("test", AssetClass.LinearPerpetual, "BTC");
@@ -32,32 +32,6 @@ BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOpt
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
-Test("Strategy folders select named backtests and resolve paths independently of the working directory", () =>
-{
-    var root = Temporary();
-    Directory.CreateDirectory(Path.Combine(root, "Backtests"));
-    File.WriteAllText(Path.Combine(root, "Strategy.cs"), "// fixture");
-    var first = Path.Combine(root, "Backtests", "Default.json");
-    Json.Write(first, new RunConfiguration { Output = "Results/Default" });
-    True(!File.ReadAllText(first).Contains("\"strategy\""));
-    Equal(first, StrategyFolder.ConfigurationPath(root));
-    Equal(Path.Combine(root, "Strategy.cs"), StrategyFolder.Source(first, StrategyFolder.Read(first)));
-    Equal(Path.Combine(root, "Results", "Default"), StrategyFolder.Resolve(first, "Results/Default"));
-    var second = Path.Combine(root, "Backtests", "HigherCosts.json");
-    Json.Write(second, new RunConfiguration { InitialCash = 2500 });
-    Equal(second, StrategyFolder.ConfigurationPath(root, "HigherCosts"));
-    Equal(2500m, StrategyFolder.Read(second).InitialCash);
-    Throws<FileNotFoundException>(() => StrategyFolder.ConfigurationPath(root, "../missing"));
-    File.Delete(first);
-    Equal(second, StrategyFolder.ConfigurationPath(root));
-    Json.Write(Path.Combine(root, "Backtests", "Other.json"), new RunConfiguration());
-    Throws<InvalidDataException>(() => StrategyFolder.ConfigurationPath(root));
-    Json.Write(second, new RunConfiguration { Strategy = "elsewhere.cs" });
-    Throws<InvalidDataException>(() => StrategyFolder.Read(second));
-    var legacy = Path.Combine(root, "run.json");
-    Json.Write(legacy, new RunConfiguration { Strategy = "Old.cs" });
-    Equal(Path.Combine(root, "Old.cs"), StrategyFolder.Source(legacy, StrategyFolder.Read(legacy)));
-});
 
 Test("Global settings round trip, replace and reject malformed files without exposing values", () =>
 {
@@ -355,12 +329,6 @@ Test("Hyperliquid fails on missing candle history", () =>
     using var http = new HttpClient(new ResponseHandler(_ => new(HttpStatusCode.OK) { Content = new StringContent("[]") }));
     Throws<InvalidDataException>(() => new HyperliquidProvider(http).FetchAsync(new(instrument, BarInterval.Hourly, start, start.AddHours(1))).GetAwaiter().GetResult());
 });
-Test("Roslyn compilation diagnostics and execution", () =>
-{
-    var directory = Temporary(); var path = Path.Combine(directory, "strategy.cs"); File.WriteAllText(path, "using Citrus.Trading; public sealed class Example : IStrategy { }");
-    using var compiled = CompiledStrategy.Load(path); Run(compiled.Strategy);
-    File.WriteAllText(path, "this is invalid C#"); Throws<InvalidDataException>(() => CompiledStrategy.Load(path));
-});
 Test("Export totals and provenance manifest", () =>
 {
     var directory = Temporary(); var strategy = Path.Combine(directory, "strategy.cs"); var dataPath = Path.Combine(directory, "data.json");
@@ -597,24 +565,10 @@ Test("Direct auction functions preserve session timing and quantities", () =>
         Equal(close ? data.Sessions[1].Close : data.Sessions[1].Open, result.Fills.Single().Time);
     }
 });
-Test("Compiled C# strategies can call direct order functions", () =>
+Test("Built-in strategies can call direct order functions", () =>
 {
-    var path = Path.Combine(Temporary(), "direct.cs");
-    File.WriteAllText(path, """
-        using Citrus.Trading;
-        public sealed class Direct : IStrategy
-        {
-            public void OnStart(IStrategyContext c)
-            {
-                c.Register("direct", 1);
-                c.Buy("direct", new Instrument("test", AssetClass.LinearPerpetual, "BTC"), 1);
-            }
-        }
-        """);
-    using var compiled = CompiledStrategy.Load(path);
-    Equal(1m, Run(compiled.Strategy).Fills.Single().Quantity);
+    Equal(1m, Run(new Citrus.Strategies.DemoHold()).Fills.Single().Quantity);
 });
-
 if (args.Contains("--benchmark"))
 {
     foreach (var (interval, count) in new[] { (BarInterval.Daily, 3650), (BarInterval.Hourly, 24 * 365 * 2) })
@@ -640,11 +594,11 @@ MarketDataset PaydayData(decimal price = 100m)
     }
     return new() { Sessions = sessions, Bars = sessions.Select(s => new Bar(schb, s.Open, s.Close, price, price, price, price, 10000, true, true)).ToList() };
 }
-Test("Payday compiled example trades exact sessions and early month-end closes across months", () =>
+Test("Payday fixture trades exact sessions and early month-end closes across months", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var strategy = new PaydaySeasonality();
     var data = PaydayData();
-    var result = Run(compiled.Strategy, data);
+    var result = Run(strategy, data);
     var expected = data.Sessions.GroupBy(s => s.Open.Month).SelectMany(g => new[] { g.ElementAt(7), g.ElementAt(11), g.ElementAt(15), g.Last() }).ToArray();
     Equal(8, result.Fills.Count);
     for (var i = 0; i < expected.Length; i++)
@@ -739,9 +693,9 @@ Test("Removed immediate-fill configuration fields are rejected", () =>
 });
 Test("Combined strategy registers ten sleeves and trades holiday gold, oil and winter gas", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "SeasonalityRiskPremia.cs"));
+    var strategy = new SeasonalityRiskPremia();
     var data = CombinedSeasonalityData();
-    var result = new BacktestEngine().Run(compiled.Strategy, data, Config() with { InitialCash = 17000 });
+    var result = new BacktestEngine().Run(strategy, data, Config() with { InitialCash = 17000 });
     Equal(10, result.Equity.First().Substrategies.Count);
     var gold = result.Fills.Where(f => f.Substrategy == "GoldSeason").ToArray();
     True(gold.Length > 0);
@@ -758,35 +712,35 @@ Test("Combined strategy registers ten sleeves and trades holiday gold, oil and w
     True(result.Fills.Any(f => f.Substrategy == "VIXBasis"));
     True(result.Fills.Any(f => f.Substrategy == "EqBondPair"));
     True(result.Fills.Where(f => f.Substrategy is "VIXBasis" or "VIXHedge" or "EqBondPair").All(f => data.Sessions.Any(s => s.Open == f.Time)));
-    var repeated = new BacktestEngine().Run(compiled.Strategy, data, Config() with { InitialCash = 17000 });
+    var repeated = new BacktestEngine().Run(strategy, data, Config() with { InitialCash = 17000 });
     True(result.Fills.SequenceEqual(repeated.Fills), "A reused strategy must reset indicator state.");
 });
 Test("Combined strategy rejects missing ETF histories at symbol binding", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "SeasonalityRiskPremia.cs"));
+    var strategy = new SeasonalityRiskPremia();
     var data = CombinedSeasonalityData();
-    Throws<ArgumentException>(() => new BacktestEngine().Run(compiled.Strategy,
+    Throws<ArgumentException>(() => new BacktestEngine().Run(strategy,
         data with { Bars = data.Bars.Where(b => b.Instrument.Symbol != "VXZ").ToList() }, Config() with { InitialCash = 17000 }));
 });
 Test("Payday sizing uses completed prices, skips unaffordable lots, and never shorts after rejected entries", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var strategy = new PaydaySeasonality();
     var data = PaydayData();
     data.Bars[7] = data.Bars[7] with { High = 110, Close = 110 };
-    var result = Run(compiled.Strategy, data);
+    var result = Run(strategy, data);
     Equal(8m, result.Fills[0].Quantity);
     Equal(110m, result.Fills[0].Price);
-    Equal(0, Run(compiled.Strategy, PaydayData(900)).Orders.Count);
-    var rejected = Run(compiled.Strategy, PaydayData(), new SimulationOptions { RejectionProbability = 1 });
+    Equal(0, Run(strategy, PaydayData(900)).Orders.Count);
+    var rejected = Run(strategy, PaydayData(), new SimulationOptions { RejectionProbability = 1 });
     Equal(0, rejected.Fills.Count);
     True(rejected.Orders.All(o => o.Request.Quantity > 0));
 });
 Test("Payday mid-month data uses full calendar ordinals and does not close at a truncated run boundary", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var strategy = new PaydaySeasonality();
     var full = PaydayData();
     var data = full with { Bars = full.Bars.Skip(5).Take(13).ToList() };
-    var result = Run(compiled.Strategy, data);
+    var result = Run(strategy, data);
     Equal(3, result.Fills.Count);
     Equal(full.Sessions[7].Close, result.Fills[0].Time);
     Equal(full.Sessions[15].Close, result.Fills[2].Time);
@@ -794,7 +748,7 @@ Test("Payday mid-month data uses full calendar ordinals and does not close at a 
 });
 Test("Payday hourly input still decides once per session and matches daily input", () =>
 {
-    using var compiled = CompiledStrategy.Load(Path.Combine(AppContext.BaseDirectory, "PaydaySeasonality.cs"));
+    var strategy = new PaydaySeasonality();
     var daily = PaydayData();
     var bars = new List<Bar>();
     foreach (var session in daily.Sessions)
@@ -805,13 +759,13 @@ Test("Payday hourly input still decides once per session and matches daily input
             bars.Add(new(daily.Bars[0].Instrument, open, close, price, price, price, price, 10000,
                 open == session.Open, close == session.Close));
         }
-    var result = new BacktestEngine().Run(compiled.Strategy, daily with { Interval = BarInterval.Hourly, Bars = bars }, Config() with { InitialCash = 2000 });
+    var result = new BacktestEngine().Run(strategy, daily with { Interval = BarInterval.Hourly, Bars = bars }, Config() with { InitialCash = 2000 });
     Equal(8, result.Fills.Count);
     Equal(6m, result.Fills[0].Quantity);
     Equal(120m, result.Fills[0].Price);
     Equal(daily.Sessions[7].Close, result.Fills[0].Time);
     Equal(daily.Sessions[6].Close, result.Orders.First().Time);
-    var dailyResult = new BacktestEngine().Run(compiled.Strategy, PaydayData(120m), Config() with { InitialCash = 2000 });
+    var dailyResult = new BacktestEngine().Run(strategy, PaydayData(120m), Config() with { InitialCash = 2000 });
     True(result.Fills.SequenceEqual(dailyResult.Fills));
 });
 
@@ -941,24 +895,9 @@ Test("Rejected entries leave no projected holding or phantom exit", () =>
 });
 Test("Daily API binds accounts and respects early auctions without consuming the unfinished bar", () =>
 {
-    var path = Path.Combine(Temporary(), "Strategy.cs");
-    File.WriteAllText(path, """
-        using Citrus.Trading;
-        public sealed class Simple : DailyStrategy
-        {
-            private StrategyAccount account = null!;
-            protected override string ClockSymbol => "SCHB";
-            protected override void Initialize() => account = Account("daily", 810, "schb");
-            protected override void BeforeClose()
-            {
-                var market = account["SCHB"];
-                if (Date.Day == 29) market.EnterLong(OrderType.MarketOnClose);
-            }
-        }
-        """);
-    using var compiled = CompiledStrategy.Load(path);
+    var strategy = new AuctionFixture();
     var data = PaydayData();
-    var result = Run(compiled.Strategy, data);
+    var result = Run(strategy, data);
     var fill = result.Fills.Single();
     Equal(8m, fill.Quantity);
     var early = data.Sessions.Single(s => s.Close.Month == 11 && s.Close.Day == 29);
@@ -1076,4 +1015,18 @@ sealed class NotificationStrategy(Instrument instrument) : IStrategy
     public void OnOrderUpdate(IStrategyContext c, OrderUpdate update) => Notifications.Add(update.Status.ToString());
     /// <summary>Records fill delivery in the same sequence as order status callbacks.</summary>
     public void OnFill(IStrategyContext c, Fill fill) => Notifications.Add("Fill");
+}
+
+/// <summary>Exercises the daily API with an early closing-auction entry.</summary>
+internal sealed class AuctionFixture : DailyStrategy
+{
+    private StrategyAccount account = null!;
+    protected override string ClockSymbol => "SCHB";
+    /// <summary>Allocates the test account and binds the clock symbol case-insensitively.</summary>
+    protected override void Initialize() => account = Account("daily", 810, "schb");
+    /// <summary>Submits an entry before the early November auction.</summary>
+    protected override void BeforeClose()
+    {
+        if (Date.Day == 29) account["SCHB"].EnterLong(OrderType.MarketOnClose);
+    }
 }

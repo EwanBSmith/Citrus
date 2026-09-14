@@ -10,9 +10,10 @@ try
     {
         Console.WriteLine("""
         Citrus: deterministic backtesting with trusted C# strategies
-          validate <strategy-folder | run.json | strategy.cs> [reference.dll ...]
-          backtest <strategy-folder> [backtest-name] (legacy run.json also accepted)
-          replay <results-folder> (uses captured strategy artifacts and historical-data.json)
+          strategies (list built-in strategy types)
+          validate <run.json>
+          backtest <run.json>
+          replay <results-folder> (requires the original Citrus build and captured historical-data.json)
           data generate <generation.json> <output.json>
           data import <dataset.json> <output.json> [supplement.json ...]
           data download <download.json> <output.json>
@@ -20,19 +21,21 @@ try
         """);
         return 0;
     }
-    if (args[0] == "validate" && args.Length >= 2)
+    if (args[0] == "strategies" && args.Length == 1)
     {
-        var folderConfig = Directory.Exists(args[1]) || Path.GetExtension(args[1]) == ".json" ? StrategyFolder.ConfigurationPath(args[1]) : null;
-        var configuration = folderConfig is null ? null : StrategyFolder.Read(folderConfig);
-        using var compiled = folderConfig is null ? CompiledStrategy.Load(args[1], args.Skip(2))
-            : CompiledStrategy.LoadConfiguration(folderConfig, configuration! with { References = configuration!.References.Concat(args.Skip(2).Select(Path.GetFullPath)).ToArray() });
-        compiled.EffectiveConfiguration(configuration ?? new());
-        Console.WriteLine($"Valid strategy: {compiled.Strategy.GetType().Name}"); return 0;
+        foreach (var name in BuiltInStrategies.Names()) Console.WriteLine(name);
+        return 0;
     }
-    if (args[0] == "backtest" && args.Length is 2 or 3 || args[0] == "replay" && args.Length == 2)
+    if (args[0] == "validate" && args.Length == 2)
     {
-        var completed = args[0] == "replay" ? BacktestRunner.Replay(args[1])
-            : BacktestRunner.Run(StrategyFolder.ConfigurationPath(args[1], args.Length == 3 ? args[2] : null));
+        var configuration = RunConfiguration.Read(args[1]);
+        var strategy = BuiltInStrategies.Create(configuration.StrategyType);
+        StrategyConfiguration.Resolve(strategy, configuration);
+        Console.WriteLine($"Valid strategy: {strategy.GetType().FullName}"); return 0;
+    }
+    if (args[0] is "backtest" or "replay" && args.Length == 2)
+    {
+        var completed = args[0] == "replay" ? BacktestRunner.Replay(args[1]) : BacktestRunner.Run(args[1]);
         Console.WriteLine($"Completed: {completed.Result.Fills.Count} attributed fills; final equity {completed.Result.Final.Equity.ToString("F2", CultureInfo.InvariantCulture)}. Results: {completed.Output}"); return 0;
     }
     if (args.Length >= 4 && args[0] == "data")

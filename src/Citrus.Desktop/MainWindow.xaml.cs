@@ -10,7 +10,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, DataGrid> grids;
     private readonly string? historicalDataDirectory;
     private string? configPath;
-    private string? strategyPath;
+    private string? strategyType;
     private string? outputPath;
     private bool configDirty;
     private bool loading;
@@ -83,7 +83,7 @@ public partial class MainWindow : Window
             case "History": new HistoricalDataWindow(historicalDataDirectory) { Owner = this }.ShowDialog(); break;
             case "Settings": new GlobalSettingsWindow { Owner = this }.ShowDialog(); break;
             case "Exit": Close(); break;
-            case "About": MessageBox.Show(this, "Citrus Backtesting Workbench\nWPF • .NET 10\n\nRun trusted external C# strategies and analyse deterministic backtests.\nAll result timestamps are UTC.", "About Citrus"); break;
+            case "About": MessageBox.Show(this, "Citrus Backtesting Workbench\nWPF • .NET 10\n\nRun built-in C# strategies and analyse deterministic backtests.\nAll result timestamps are UTC.", "About Citrus"); break;
         }
     });
 
@@ -93,7 +93,7 @@ public partial class MainWindow : Window
         if (loading || configPath is null || sender is not MenuItem { Tag: string name }) return;
         Guard(() =>
         {
-            try { LoadConfiguration(StrategyFolder.ConfigurationPath(StrategyFolder.Root(configPath)!, name)); }
+            try { LoadConfiguration(name); }
             finally { RefreshBacktests(); }
         });
     }
@@ -111,19 +111,18 @@ public partial class MainWindow : Window
         try
         {
             backtests.Items.Clear();
-            var root = configPath is null ? null : StrategyFolder.Root(configPath);
+            var root = configPath is null ? null : Path.GetDirectoryName(configPath);
             backtests.IsEnabled = root is not null;
             if (root is null) return;
             var config = configEditor.ReadConfiguration(validate: false);
-            var paths = root == catalogRoot && config.StrategyType is string type
-                ? StrategyCatalog.Backtests(root, type) : StrategyFolder.Backtests(root);
+            var paths = StrategyCatalog.Backtests(root, config.StrategyType!);
             foreach (var path in paths)
             {
                 var name = Path.GetFileNameWithoutExtension(path);
                 var item = new MenuItem
                 {
                     Header = new TextBlock { Text = name },
-                    Tag = name,
+                    Tag = path,
                     IsCheckable = true,
                     IsChecked = string.Equals(name, Path.GetFileNameWithoutExtension(configPath), StringComparison.OrdinalIgnoreCase)
                 };
@@ -137,14 +136,13 @@ public partial class MainWindow : Window
     /// <summary>Copies current saved settings to a named backtest with its own result directory.</summary>
     private void CopyBacktest()
     {
-        if (configPath is null || StrategyFolder.Root(configPath) is not string root)
-            throw new InvalidOperationException("Open a strategy folder first.");
-        var dialog = new SaveFileDialog { Title = "Copy backtest", Filter = "Backtest (*.json)|*.json", InitialDirectory = Path.Combine(root, "Backtests"), FileName = "NewBacktest.json" };
+        if (configPath is null)
+            throw new InvalidOperationException("Select a strategy first.");
+        var root = Path.GetDirectoryName(configPath)!;
+        var dialog = new SaveFileDialog { Title = "Copy backtest", Filter = "Backtest (*.json)|*.json", InitialDirectory = root, FileName = "NewBacktest.json" };
         if (dialog.ShowDialog(this) != true) return;
-        if (!string.Equals(Path.GetDirectoryName(dialog.FileName), Path.Combine(root, "Backtests"), StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Save the backtest inside this strategy's Backtests folder.");
         SaveAll();
-        var configuration = configEditor.ReadConfiguration() with { Strategy = null, Output = "Results/" + Path.GetFileNameWithoutExtension(dialog.FileName) };
+        var configuration = configEditor.ReadConfiguration() with { Output = "Results/" + Path.GetFileNameWithoutExtension(dialog.FileName) };
         Citrus.Data.Json.Write(dialog.FileName, configuration);
         LoadConfiguration(dialog.FileName);
     }
@@ -164,16 +162,15 @@ public partial class MainWindow : Window
         if (strategies.Items.Count == 0) _ = RefreshStrategiesAsync();
     }
 
-    /// <summary>Builds the main project away from the dispatcher and lists runnable strategy classes.</summary>
-    internal async Task RefreshStrategiesAsync()
+    /// <summary>Lists the runnable strategy classes included in this Citrus build.</summary>
+    internal Task RefreshStrategiesAsync()
     {
-        if (busy) return;
+        if (busy) return Task.CompletedTask;
         try
         {
             SetBusy(true, "Loading Citrus.Strategies...");
-            catalogRoot = StrategyCatalog.FindRoot();
-            var project = Path.Combine(catalogRoot, StrategyCatalog.Project);
-            var names = await Task.Run(() => CompiledStrategy.DiscoverAssembly(StrategyProject.Build(project)));
+            catalogRoot = StrategyCatalog.ConfigurationDirectory();
+            var names = BuiltInStrategies.Names();
             loading = true;
             try
             {
@@ -181,16 +178,17 @@ public partial class MainWindow : Window
                 strategies.SelectedItem = configPath is null ? null : configEditor.ReadConfiguration(false).StrategyType;
             }
             finally { loading = false; }
-            catalogStatus.Text = names.Length == 0 ? "No runnable strategies found. Add a public strategy class, then Refresh."
+            catalogStatus.Text = names.Length == 0 ? "No runnable strategies found. Add a public strategy class, rebuild Citrus and restart."
                 : $"{names.Length} strategies — select one to load its backtest settings.";
             status.Text = "Ready — select a strategy";
         }
         catch (Exception exception)
         {
-            catalogStatus.Text = "Could not load strategies. Fix the build errors in the execution log, then Refresh.";
+            catalogStatus.Text = "Could not list built-in strategies. See the execution log.";
             ShowError(exception);
         }
         finally { SetBusy(false); }
+        return Task.CompletedTask;
     }
 
     /// <summary>Opens saved settings for the selected type, preserving edits if selection is cancelled.</summary>
@@ -214,24 +212,24 @@ public partial class MainWindow : Window
         });
     }
 
-    /// <summary>Loads both documents only after reads succeed and outstanding edits are resolved.</summary>
+    /// <summary>Loads saved settings only after reads succeed and outstanding edits are resolved.</summary>
     internal void LoadConfiguration(string path)
     {
-        var fullPath = StrategyFolder.ConfigurationPath(path);
-        var configuration = StrategyFolder.Read(fullPath);
-        var sourcePath = StrategyFolder.Input(fullPath, configuration);
-        if (!File.Exists(sourcePath)) throw new FileNotFoundException("Strategy input was not found.", sourcePath);
+        var fullPath = Path.GetFullPath(path);
+        var configuration = RunConfiguration.Read(fullPath);
+        var selectedType = configuration.StrategyType;
+        if (!BuiltInStrategies.Names().Contains(selectedType)) throw new InvalidDataException("Unknown built-in strategy: " + selectedType);
         if (!ConfirmEdits()) return;
         // Re-read after saving in case the selected run is the currently edited document.
-        configuration = StrategyFolder.Read(fullPath);
-        sourcePath = StrategyFolder.Input(fullPath, configuration);
+        configuration = RunConfiguration.Read(fullPath);
+        selectedType = configuration.StrategyType;
         loading = true;
         try
         {
             configEditor.LoadConfiguration(configuration); configEditor.ConfigurationPath = fullPath;
         }
         finally { loading = false; }
-        configPath = fullPath; strategyPath = sourcePath; RefreshBacktests();
+        configPath = fullPath; strategyType = selectedType; RefreshBacktests();
         loading = true;
         try { strategies.SelectedItem = configuration.StrategyType; }
         finally { loading = false; }
@@ -249,12 +247,12 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) LoadConfiguration(BacktestWorkspace.CreateExample(dialog.FolderName, historicalDataDirectory));
     }
 
-    /// <summary>Saves validated backtest settings; strategy source belongs to the external IDE.</summary>
+    /// <summary>Saves validated backtest settings; strategy source is built into Citrus.Strategies.</summary>
     private void SaveAll(bool validate = true)
     {
-        if (configPath is null || strategyPath is null) throw new InvalidOperationException("Open a run configuration or create an example first.");
+        if (configPath is null || strategyType is null) throw new InvalidOperationException("Open a run configuration or create an example first.");
         var configuration = configEditor.ReadConfiguration(validate);
-        StrategyFolder.Validate(configuration);
+
         if (configDirty) { Citrus.Data.Json.Write(configPath, configuration); configDirty = false; }
         UpdateTitle(); AppendLog("Saved workspace documents.");
     }
@@ -269,28 +267,24 @@ public partial class MainWindow : Window
         return true;
     }
 
-    /// <summary>Captures saved settings and refreshes source if the configured strategy path has changed.</summary>
+    /// <summary>Captures saved settings and the selected built-in strategy type.</summary>
     private RunConfiguration Prepare()
     {
         SaveAll(validate: false);
         var configuration = configEditor.ReadConfiguration(validate: false);
-        strategyPath = StrategyFolder.Input(configPath!, configuration);
+        strategyType = configuration.StrategyType;
         UpdateTitle();
         return configuration;
     }
 
-    /// <summary>Opens the configured solution, project, or legacy source using its Windows file association.</summary>
+    /// <summary>Opens the main Citrus solution using its Windows file association.</summary>
     private void OpenDevelopmentEnvironment()
     {
-        if (configPath is null) throw new InvalidOperationException("Open a strategy workspace first.");
-        var path = StrategyFolder.DevelopmentPath(configPath, configEditor.ReadConfiguration());
-        if (!File.Exists(path)) throw new FileNotFoundException("The configured solution or project was not found.", path);
-        if (Path.GetExtension(path).Equals(".dll", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Set a strategy solution in Configuration to open the source for a prebuilt assembly.");
+        var path = Path.Combine(StrategyCatalog.FindRoot(), "Citrus.slnx");
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
 
-    /// <summary>Compiles the saved strategy away from the UI thread and reports compiler diagnostics.</summary>
+    /// <summary>Reads and validates built-in strategy settings away from the UI thread.</summary>
     private async Task ValidateAsync(bool save = true)
     {
         if (busy) return;
@@ -301,9 +295,9 @@ public partial class MainWindow : Window
             SetBusy(true, "Validating strategy...");
             var resolved = await Task.Run(() =>
             {
-                using var compiled = CompiledStrategy.LoadConfiguration(path, config);
-                return (Name: compiled.Strategy.GetType().Name, Configuration: compiled.EffectiveConfiguration(config),
-                    Fields: compiled.Options.Keys.Select(StrategyConfiguration.Field).ToArray());
+                var strategy = BuiltInStrategies.Create(config.StrategyType);
+                return (Name: strategy.GetType().Name, Configuration: StrategyConfiguration.Resolve(strategy, config),
+                    Fields: StrategyConfiguration.Declarations(strategy).Keys.Select(StrategyConfiguration.Field).ToArray());
             });
             configEditor.LoadConfiguration(resolved.Configuration, resolved.Fields);
             AppendLog("Valid strategy: " + resolved.Name); status.Text = "Strategy settings loaded — C# assignments are read-only";
@@ -321,7 +315,7 @@ public partial class MainWindow : Window
             var config = Prepare();
             var path = configPath!;
             ClearResults();
-            SetBusy(true, "Running backtest — preparing data, compiling, simulating and exporting...");
+            SetBusy(true, "Running backtest — preparing data, simulating and exporting...");
             var watch = Stopwatch.StartNew();
             var completed = await Task.Run(() => BacktestRunner.Run(path, config, historicalDataDirectory,
                 (effective, fields) => Dispatcher.Invoke(() => configEditor.LoadConfiguration(effective, fields))));
@@ -368,7 +362,7 @@ public partial class MainWindow : Window
         Process.Start(new ProcessStartInfo(outputPath) { UseShellExecute = true });
     }
 
-    /// <summary>Prevents concurrent commands and source mutation while keeping results and logs responsive.</summary>
+    /// <summary>Prevents concurrent commands while keeping results and logs responsive.</summary>
     private void SetBusy(bool value, string? message = null)
     {
         busy = value; menu.IsEnabled = !value;
@@ -379,15 +373,13 @@ public partial class MainWindow : Window
         if (message is not null) { status.Text = message; AppendLog(message); }
     }
 
-    /// <summary>Marks edited documents and identifies the current run and source in their tabs.</summary>
+    /// <summary>Marks edited settings and identifies the current run and strategy.</summary>
     private void UpdateTitle()
     {
         strategyPage.Header = "Strategy";
-        strategyPage.ToolTip = strategyPath;
-        strategyDetails.Text = strategyPath is null ? "Select a strategy above to begin."
-            : string.IsNullOrWhiteSpace(configEditor.StrategyType.Text) ? strategyPath : configEditor.StrategyType.Text;
+        strategyPage.ToolTip = strategyType;
         configPage.Header = "Configuration" + (configDirty ? " *" : "");
-        Title = $"{(configPath is null ? "Citrus" : (StrategyFolder.Root(configPath) is string folder ? Path.GetFileName(folder) + " / " + Path.GetFileNameWithoutExtension(configPath) : Path.GetFileName(configPath)) + " — Citrus")} — Backtesting Workbench";
+        Title = $"{(configPath is null ? "Citrus" : Path.GetFileName(configPath) + " — Citrus")} — Backtesting Workbench";
     }
 
     /// <summary>Appends a timestamped diagnostic line and scrolls it into view.</summary>
@@ -401,7 +393,7 @@ public partial class MainWindow : Window
         ErrorDialog.Show(this, "Citrus operation failed", exception);
     }
 
-    /// <summary>Prevents closing mid-run and preserves unsaved source/configuration edits.</summary>
+    /// <summary>Prevents closing mid-run and preserves unsaved configuration edits.</summary>
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (busy) { e.Cancel = true; status.Text = "Wait for the current operation to finish before closing."; return; }

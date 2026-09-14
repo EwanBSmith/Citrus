@@ -4,7 +4,7 @@ using System.Linq;
 using System.IO;
 using System.Text;
 using System.Globalization;
-using System.Runtime.CompilerServices;
+
 using Citrus.Trading;
 
 /// <summary>Combines ten calendar, reversion, volatility, and risk-premia sleeves from the supplied source.</summary>
@@ -104,9 +104,9 @@ public sealed class SeasonalityRiskPremia : IStrategy
     }
 
     /// <summary>Loads an archived Cboe CSV beside the strategy and caches its bytes for this run.</summary>
-    private static Dictionary<DateOnly, decimal> LoadIndex(IStrategyContext context, string symbol, [CallerFilePath] string source = "")
+    private static Dictionary<DateOnly, decimal> LoadIndex(IStrategyContext context, string symbol)
     {
-        var bytes = context.ExternalData("CBOE/" + symbol, () => File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(source))!, "Data", symbol + ".csv")));
+        var bytes = context.ExternalData("CBOE/" + symbol, () => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Data", symbol + ".csv")));
         return Encoding.UTF8.GetString(bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1)
             .Select(line => line.Trim().Split(','))
             .ToDictionary(row => DateOnly.Parse(row[0], CultureInfo.InvariantCulture), row => decimal.Parse(row[4], CultureInfo.InvariantCulture));

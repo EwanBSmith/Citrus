@@ -1,9 +1,7 @@
 {
   "schemaVersion": 1,
-  "output": "Results/Comparison",
-  "strategyProject": "src/Citrus.Strategies/Citrus.Strategies.csproj",
+  "output": "../Results/Comparison",
   "strategyType": "ZorroPortfolio",
-  "strategySolution": "Citrus.slnx",
   "start": "2020-11-01T00:00:00Z",
   "end": "2026-09-12T00:00:00Z"
 }
