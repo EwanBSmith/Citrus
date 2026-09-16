@@ -12,9 +12,9 @@ public sealed class DataCache(string directory)
     public static MarketDataset Load(string directory, BarInterval interval, DateTimeOffset? start = null,
         DateTimeOffset? end = null)
     {
-        if (interval.Minutes <= 0 || start is not null && start.Value.Offset != TimeSpan.Zero ||
+        if (interval != BarInterval.Daily || start is not null && start.Value.Offset != TimeSpan.Zero ||
             end is not null && end.Value.Offset != TimeSpan.Zero || start is not null && end is not null && start >= end)
-            throw new ArgumentException("Historical cache selection requires a positive interval and a valid UTC range.");
+            throw new ArgumentException("Historical cache selection requires daily bars and a valid UTC range.");
         directory = Path.GetFullPath(directory);
         if (!Directory.Exists(directory)) throw new DirectoryNotFoundException($"Historical data cache does not exist: {directory}");
         var datasets = new List<MarketDataset>();
@@ -55,7 +55,7 @@ public sealed class DataCache(string directory)
     public async Task<MarketDataset> GetAsync(IMarketDataProvider provider, DataRequest request, IReadOnlyList<MarketSession> sessions,
         CancellationToken cancellationToken = default)
     {
-        if (request.Start >= request.End || request.Start.Offset != TimeSpan.Zero || request.End.Offset != TimeSpan.Zero || request.Interval.Minutes <= 0)
+        if (request.Start >= request.End || request.Start.Offset != TimeSpan.Zero || request.End.Offset != TimeSpan.Zero || request.Interval != BarInterval.Daily)
             throw new ArgumentException("Coverage must be a nonempty UTC range.");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, $"symbol-{Uri.EscapeDataString(request.Instrument.Symbol.ToUpperInvariant())}-{request.Interval.Minutes}.json");

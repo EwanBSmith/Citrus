@@ -27,8 +27,6 @@ public interface IStrategyContext
     bool Cancel(long orderId);
     /// <summary>Targets a complete substrategy portfolio using current equity and completed prices; omitted holdings target zero and pending quantities count toward targets.</summary>
     void Rebalance(string substrategy, IReadOnlyDictionary<Instrument, decimal> weights);
-    /// <summary>Schedules a named callback at a future UTC time; times beyond the run do not execute.</summary>
-    void Schedule(DateTimeOffset time, string name);
     /// <summary>Fetches bytes once per key during a run and returns defensive copies.</summary>
     byte[] ExternalData(string key, Func<byte[]> fetch);
 }

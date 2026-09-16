@@ -8,8 +8,8 @@ public static class DatasetValidator
     /// <summary>Rejects malformed bars, sessions, and supplementary events; coverage is checked separately.</summary>
     public static void Validate(MarketDataset data)
     {
-        if (data.Interval.Minutes <= 0 || data.Bars.Count == 0)
-            throw new InvalidDataException("Dataset requires a positive interval and bars.");
+        if (data.Interval != BarInterval.Daily || data.Bars.Count == 0)
+            throw new InvalidDataException("Dataset requires daily bars; other intervals are unsupported.");
         foreach (var symbol in data.Bars.Select(b => b.Instrument).Distinct().GroupBy(i => i.Symbol, StringComparer.OrdinalIgnoreCase))
             if (symbol.Count() > 1)
                 throw new InvalidDataException($"Conflicting historical datasets for symbol '{symbol.Key}'. Keep one instrument definition per symbol and interval; provider and venue are metadata, not separate history keys.");
@@ -33,9 +33,12 @@ public static class DatasetValidator
                     throw new InvalidDataException($"Invalid or unordered bar for {group.Key.Key} at {bar.OpenTime:O}.");
                 if (previous == bar.CloseTime) throw new InvalidDataException("Duplicate bar.");
                 previous = bar.CloseTime;
-                if (group.Key.AssetClass == AssetClass.Equity && !data.Sessions.Any(s => s.Open <= bar.OpenTime && s.Close >= bar.CloseTime &&
-                    bar.SessionOpen == (bar.OpenTime == s.Open) && bar.SessionClose == (bar.CloseTime == s.Close)))
-                    throw new InvalidDataException("Equity bars must match explicit exchange sessions and boundary flags.");
+                if (group.Key.AssetClass == AssetClass.Equity && (!bar.SessionOpen || !bar.SessionClose ||
+                    !data.Sessions.Any(s => s.Open == bar.OpenTime && s.Close == bar.CloseTime)))
+                    throw new InvalidDataException("Daily equity bars must span an entire exchange session with both boundary flags.");
+                if (group.Key.AssetClass == AssetClass.LinearPerpetual &&
+                    (bar.OpenTime.TimeOfDay != TimeSpan.Zero || bar.CloseTime != bar.OpenTime.AddDays(1)))
+                    throw new InvalidDataException("Daily perpetual bars must span midnight to midnight UTC.");
             }
         }
         foreach (var f in data.Funding)
@@ -44,26 +47,25 @@ public static class DatasetValidator
         if (data.Funding.GroupBy(f => (f.Instrument, f.Time)).Any(g => g.Count() > 1)) throw new InvalidDataException("Duplicate funding event.");
     }
 
-    /// <summary>Builds bar boundaries for a range, clipping equities to supplied sessions and perpetuals to the range end.</summary>
+    /// <summary>Builds complete daily boundaries: exchange sessions for equities and UTC days for perpetuals.</summary>
     public static IReadOnlyList<(DateTimeOffset Open, DateTimeOffset Close)> Expected(Instrument instrument, BarInterval interval,
         DateTimeOffset start, DateTimeOffset end, IReadOnlyList<MarketSession> sessions)
     {
+        if (interval != BarInterval.Daily) throw new ArgumentException("Only daily bars are supported.");
         var result = new List<(DateTimeOffset, DateTimeOffset)>();
         if (instrument.AssetClass == AssetClass.Equity)
         {
-            foreach (var session in sessions.Where(s => s.Close > start && s.Open < end).OrderBy(s => s.Open))
-                for (var t = session.Open; t < session.Close; t = t.AddMinutes(interval.Minutes))
-                {
-                    var close = interval.Minutes >= 1440 ? session.Close : Min(t.AddMinutes(interval.Minutes), session.Close);
-                    if (t >= start && close <= end) result.Add((t, close));
-                }
+            foreach (var session in sessions.Where(s => s.Open >= start && s.Close <= end).OrderBy(s => s.Open))
+                result.Add((session.Open, session.Close));
         }
         else
-            for (var t = start; t < end; t = t.AddMinutes(interval.Minutes)) result.Add((t, Min(t.AddMinutes(interval.Minutes), end)));
+        {
+            var first = new DateTimeOffset(start.UtcDateTime.Date, TimeSpan.Zero);
+            if (first < start) first = first.AddDays(1);
+            for (var t = first; t.AddDays(1) <= end; t = t.AddDays(1)) result.Add((t, t.AddDays(1)));
+        }
         return result;
     }
-    /// <summary>Returns the earlier instant when clipping a bar to a session or requested range.</summary>
-    private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
     /// <summary>Throws when any expected boundary pair is missing for the requested instrument and range.</summary>
     public static void RequireCoverage(MarketDataset data, Instrument instrument, DateTimeOffset start, DateTimeOffset end)
     {

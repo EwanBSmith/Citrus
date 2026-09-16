@@ -19,8 +19,7 @@ public partial class HistoricalDataWindow : Window
         InitializeComponent();
         provider.ItemsSource = new[] { "Alpaca", "Hyperliquid" };
         feed.ItemsSource = new[] { "iex", "sip" };
-        interval.ItemsSource = new[] { "1d", "1h" };
-        provider.SelectedIndex = feed.SelectedIndex = interval.SelectedIndex = 0;
+        provider.SelectedIndex = feed.SelectedIndex = 0;
         start.SelectedDate = DateTime.UtcNow.Date.AddMonths(-1);
         end.SelectedDate = DateTime.UtcNow.Date;
         Loaded += async (_, _) =>
@@ -95,7 +94,7 @@ public partial class HistoricalDataWindow : Window
             var directory = LibraryPath();
             if (string.IsNullOrWhiteSpace(symbol.Text) || string.IsNullOrWhiteSpace(venue.Text)) throw new InvalidOperationException("Symbol and venue are required.");
             var request = new DataRequest(new Instrument(venue.Text.Trim(), provider.SelectedIndex == 0 ? AssetClass.Equity : AssetClass.LinearPerpetual, symbol.Text.Trim().ToUpperInvariant()),
-                interval.SelectedIndex == 0 ? BarInterval.Daily : BarInterval.Hourly, new DateTimeOffset((start.SelectedDate ?? throw new InvalidOperationException("Select a start date.")).Date, TimeSpan.Zero), new DateTimeOffset((end.SelectedDate ?? throw new InvalidOperationException("Select an end date.")).Date, TimeSpan.Zero));
+                BarInterval.Daily, new DateTimeOffset((start.SelectedDate ?? throw new InvalidOperationException("Select a start date.")).Date, TimeSpan.Zero), new DateTimeOffset((end.SelectedDate ?? throw new InvalidOperationException("Select an end date.")).Date, TimeSpan.Zero));
             if (request.Start >= request.End || request.End > DateTimeOffset.UtcNow) throw new InvalidOperationException("Choose a start before the exclusive end, with the end no later than today.");
             var providerName = (string)provider.SelectedItem; var feedName = (string)feed.SelectedItem;
             SetBusy(true); cancel.IsEnabled = true; status.Text = "Downloading and validating history...";

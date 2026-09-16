@@ -54,7 +54,7 @@ internal static class DesktopSmokeTest
             var alternatePath = Path.Combine(Path.GetDirectoryName(path)!, "HigherCosts.json");
             Json.Write(alternatePath, config with { InitialCash = 75000, Output = "Results/HigherCosts" });
             var fixture = Citrus.Data.BrownianGenerator.Generate(new Citrus.Trading.Instrument("hyperliquid", Citrus.Trading.AssetClass.LinearPerpetual, "BTC"),
-                Citrus.Trading.BarInterval.Hourly, DateTimeOffset.Parse("2024-01-01T00:00:00Z"), 24, 42);
+                Citrus.Trading.BarInterval.Daily, DateTimeOffset.Parse("2024-01-01T00:00:00Z"), 24, 42);
             Json.Write(Path.Combine(library, "fixture.json"), fixture);
             File.WriteAllText(Path.Combine(library, "broken.json"), "{broken");
             Json.Write(Path.Combine(library, "empty.json"), new MarketDataset());
@@ -173,7 +173,7 @@ internal static class DesktopSmokeTest
             window.LoadConfiguration(declaredPath);
             await window.OptionsReady;
             Require(editor.ReadConfiguration().InitialCash == 17000 && !editor.InitialCash.IsEnabled
-                && !editor.Interval.IsEnabled && editor.Seed.IsEnabled && editor.Output.IsEnabled,
+                && editor.Seed.IsEnabled && editor.Output.IsEnabled,
                 "Built-in declarations were not displayed and locked selectively.");
             editor.InitialCash.Text = "1";
             Require(editor.ReadConfiguration().InitialCash == 17000, "A disabled field bypassed strategy authority.");

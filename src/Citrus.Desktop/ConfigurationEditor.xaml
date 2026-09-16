@@ -25,8 +25,6 @@
     <Grid Grid.Row="0" Grid.Column="1"><TextBox x:Name="Start" TextChanged="FieldChanged" AutomationProperties.Name="Start (UTC; blank for all history)" ToolTip="ISO 8601 timestamp, for example 2024-01-01T00:00:00Z. Blank means no boundary."/></Grid>
     <Label Grid.Row="1" Content="End (UTC; exclusive, optional)" Target="{Binding ElementName=End}"/>
     <Grid Grid.Row="1" Grid.Column="1"><TextBox x:Name="End" TextChanged="FieldChanged" AutomationProperties.Name="End (UTC; exclusive, optional)" ToolTip="ISO 8601 timestamp, for example 2024-01-01T00:00:00Z. Blank means no boundary."/></Grid>
-    <Label Grid.Row="2" Content="Bar interval" Target="{Binding ElementName=Interval}"/>
-    <Grid Grid.Row="2" Grid.Column="1"><ComboBox x:Name="Interval" Margin="3,5" DisplayMemberPath="Name" SelectionChanged="FieldChanged" AutomationProperties.Name="Bar interval"/></Grid>
    </Grid></GroupBox>
    <GroupBox Header="Capital and reproducibility" Padding="12" Margin="0,0,0,14"><Grid>
     <Grid.ColumnDefinitions><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

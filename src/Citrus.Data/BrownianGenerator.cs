@@ -15,7 +15,7 @@ public static class BrownianGenerator
         if (instrument.AssetClass == AssetClass.Equity && (sessions is null || sessions.Count == 0)) throw new ArgumentException("Equities generation requires sessions.");
         var rng = new Random(seed);
         var boundaries = DatasetValidator.Expected(instrument, interval, start,
-            instrument.AssetClass == AssetClass.Equity ? sessions!.Max(s => s.Close) : start.AddMinutes((long)count * interval.Minutes), sessions ?? []).Take(count).ToArray();
+            instrument.AssetClass == AssetClass.Equity ? sessions!.Max(s => s.Close) : start.AddDays(count), sessions ?? []).Take(count).ToArray();
         if (boundaries.Length < count) throw new ArgumentException("Insufficient sessions for generated bar count.");
         var price = (double)initialPrice;
         var bars = new List<Bar>();
@@ -23,7 +23,7 @@ public static class BrownianGenerator
         {
             var first = price; var high = price; var low = price;
             var dt = instrument.AssetClass == AssetClass.Equity
-                ? interval.Minutes >= 1440 ? 1.0 / 252 / 4 : (close - open).TotalMinutes / (252 * 390 * 4)
+                ? 1.0 / 252 / 4
                 : (close - open).TotalDays / (365 * 4);
             for (var step = 0; step < 4; step++)
             {

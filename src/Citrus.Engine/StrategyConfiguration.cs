@@ -9,16 +9,16 @@ namespace Citrus.Engine;
 /// <summary>Resolves strategy declarations into validated effective settings shared by all execution entry points.</summary>
 public static class StrategyConfiguration
 {
-    private static readonly ConditionalWeakTable<IStrategy, IReadOnlyDictionary<string, object?>> declarations = new();
+    private static readonly ConditionalWeakTable<Strategy, IReadOnlyDictionary<string, object?>> declarations = new();
 
     /// <summary>Evaluates Configure once per strategy instance and freezes its explicitly assigned values.</summary>
-    public static IReadOnlyDictionary<string, object?> Declarations(IStrategy strategy) => declarations.GetValue(strategy, Read);
+    public static IReadOnlyDictionary<string, object?> Declarations(Strategy strategy) => declarations.GetValue(strategy, Read);
 
     /// <summary>Snapshots declarations so retaining and mutating the options object cannot change an active run.</summary>
-    private static IReadOnlyDictionary<string, object?> Read(IStrategy strategy)
+    private static IReadOnlyDictionary<string, object?> Read(Strategy strategy)
     {
         var options = new StrategyOptions();
-        strategy.Configure(options);
+        strategy.ConfigureRun(options);
         return new ReadOnlyDictionary<string, object?>(options.AssignedValues.ToDictionary(p => p.Key, p => p.Value));
     }
 
@@ -26,7 +26,7 @@ public static class StrategyConfiguration
     public static string Field(string name) => typeof(RunConfiguration).GetProperty(name) is not null ? name : "Simulation." + name;
 
     /// <summary>Applies declarations over requested settings, validating only the resulting effective configuration.</summary>
-    public static RunConfiguration Resolve(IStrategy strategy, RunConfiguration requested) => Apply(requested, Declarations(strategy));
+    public static RunConfiguration Resolve(Strategy strategy, RunConfiguration requested) => Apply(requested, Declarations(strategy));
 
     /// <summary>Applies frozen declarations without invoking strategy code again.</summary>
     public static RunConfiguration Apply(RunConfiguration requested, IReadOnlyDictionary<string, object?> values)
@@ -45,11 +45,9 @@ public static class StrategyConfiguration
     }
 
     /// <summary>Enforces strategy-defined data bounds for direct engine callers while retaining the full exchange calendar.</summary>
-    public static MarketDataset SelectData(IStrategy strategy, MarketDataset data, RunConfiguration configuration)
+    public static MarketDataset SelectData(Strategy strategy, MarketDataset data, RunConfiguration configuration)
     {
         var values = Declarations(strategy);
-        if (values.ContainsKey(nameof(StrategyOptions.Interval)) && data.Interval != configuration.Interval)
-            throw new ArgumentException("The supplied dataset interval does not match the interval defined by the strategy.");
         if (!values.ContainsKey(nameof(StrategyOptions.Start)) && !values.ContainsKey(nameof(StrategyOptions.End))) return data;
         var bars = data.Bars.Where(b => (configuration.Start is null || b.OpenTime >= configuration.Start) &&
             (configuration.End is null || b.CloseTime <= configuration.End)).ToList();
@@ -63,8 +61,8 @@ public static class StrategyConfiguration
     {
 
         if (configuration.SchemaVersion != 1 || configuration.InitialCash <= 0) throw new ArgumentException("Initial cash must be positive and the configuration schema must be supported.");
-        if (configuration.Interval is null || configuration.Interval.Minutes <= 0 || string.IsNullOrWhiteSpace(configuration.Interval.Name))
-            throw new ArgumentException("Strategy interval must have a name and positive duration.");
+        if (configuration.Interval != BarInterval.Daily)
+            throw new ArgumentException("Only end-of-day bars are supported.");
         if (configuration.Start is not null && configuration.End is not null && configuration.Start >= configuration.End)
             throw new ArgumentException("Start must precede the exclusive end.");
         if (configuration.Simulation is null) throw new ArgumentException("Simulation settings are required.");

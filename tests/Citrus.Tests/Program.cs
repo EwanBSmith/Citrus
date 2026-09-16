@@ -9,15 +9,15 @@ using Citrus.Simulation;
 
 // Keep regression checks offline and package-free; named actions are executed by the runner below.
 var tests = new List<(string Name, Action Test)>();
-DailyStrategyTests.Register((name, action) => tests.Add((name, action)));
+StrategyTests.Register((name, action) => tests.Add((name, action)));
 BuiltInStrategyTests.Register((name, action) => tests.Add((name, action)));
 StrategyConfigurationTests.Register((name, action) => tests.Add((name, action)));
 BacktestRunnerTests.Register((name, action) => tests.Add((name, action)));
 var instrument = new Instrument("test", AssetClass.LinearPerpetual, "BTC");
 var start = DateTimeOffset.Parse("2024-01-01T00:00:00Z");
-// Build hourly perpetual bars with the supplied open/close prices and a fixed intrabar price range.
-MarketDataset Data(params decimal[] prices) => new() { Interval = BarInterval.Hourly, Bars = prices.Select((p, i) =>
-    new Bar(instrument, start.AddHours(i), start.AddHours(i + 1), p, p + 5, p - 5, p, 1000)).ToList() };
+// Build daily perpetual bars with the supplied open/close prices and a fixed intrabar price range.
+MarketDataset Data(params decimal[] prices) => new() { Interval = BarInterval.Daily, Bars = prices.Select((p, i) =>
+    new Bar(instrument, start.AddDays(i), start.AddDays(i + 1), p, p + 5, p - 5, p, 1000)).ToList() };
 // Create a small-capital run configuration with zero borrow by default unless options are supplied.
 RunConfiguration Config(SimulationOptions? simulation = null) => new() { InitialCash = 1000, Simulation = simulation ?? new() { AnnualBorrowRate = 0 } };
 // Register a named regression action for the package-free test runner.
@@ -29,7 +29,7 @@ void True(bool condition, string reason = "Assertion failed") { if (!condition) 
 // Require the action to throw the specified exception type, allowing derived exception types.
 void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new Exception($"Expected {typeof(T).Name}."); }
 // Run a fixture strategy against supplied data or the default three-bar scenario.
-BacktestResult Run(IStrategy strategy, MarketDataset? data = null, SimulationOptions? options = null) => new BacktestEngine().Run(strategy, data ?? Data(100, 110, 120), Config(options));
+BacktestResult Run(Strategy strategy, MarketDataset? data = null, SimulationOptions? options = null) => new BacktestEngine().Run(strategy, data ?? Data(100, 110, 120), Config(options));
 // Create a unique temporary directory for filesystem and compilation fixtures.
 string Temporary() { var path = Path.Combine(Path.GetTempPath(), "citrus-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
 
@@ -59,7 +59,7 @@ Test("Global settings round trip, replace and reject malformed files without exp
 
 Test("Substrategy registration permits 100 accounts and rejects the 101st", () =>
 {
-    var result = Run(new CallbackStrategy(weight: 0.001m, onStart: c =>
+    var result = Run(new CallbackStrategy(weight: 0.001m, initialize: c =>
     {
         for (var i = 1; i < 100; i++) c.Register($"s{i}", 0.001m);
         Throws<InvalidOperationException>(() => c.Register("overflow", 0.001m));
@@ -81,8 +81,8 @@ Test("Strategies can observe and trade all dataset instruments without configura
     var restored = Json.Read<RunConfiguration>(path);
     var observedOther = false;
     var result = new BacktestEngine().Run(new CallbackStrategy(
-        onStart: c => c.Buy("a", instrument, 1),
-        onBar: (c, bars) =>
+        initialize: c => c.Buy("a", instrument, 1),
+        onClose: (c, bars) =>
         {
             observedOther |= bars.Any(b => b.Instrument == other);
             True(c.History(other, 10).Count > 0);
@@ -94,70 +94,70 @@ Test("Strategies can observe and trade all dataset instruments without configura
 });
 Test("Orders require market bars for the requested instrument", () =>
 {
-    Throws<ArgumentException>(() => Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument with { Symbol = "MISSING" }, 1))));
+    Throws<ArgumentException>(() => Run(new CallbackStrategy(initialize: c => c.Buy("a", instrument with { Symbol = "MISSING" }, 1))));
 });
 Test("Market decisions see only completed bars and fill next open", () =>
 {
-    var strategy = new CallbackStrategy(onBar: (c, b) => { Equal(b[^1].CloseTime, c.Time); True(c.History(instrument, 100).All(x => x.CloseTime <= c.Time)); if (c.History(instrument, 100).Count == 1) c.Submit(new("a", instrument, 1)); });
-    var result = Run(strategy); Equal(1, result.Fills.Count); Equal(110m, result.Fills[0].Price); Equal(start.AddHours(1), result.Fills[0].Time); Equal(1010m, result.Final.Equity);
+    var strategy = new CallbackStrategy(onClose: (c, b) => { Equal(b[^1].CloseTime, c.Time); True(c.History(instrument, 100).All(x => x.CloseTime <= c.Time)); if (c.History(instrument, 100).Count == 1) c.Submit(new("a", instrument, 1)); });
+    var result = Run(strategy); Equal(1, result.Fills.Count); Equal(110m, result.Fills[0].Price); Equal(start.AddDays(1), result.Fills[0].Time); Equal(1010m, result.Final.Equity);
 });
-Test("Startup has no future observations", () => Run(new CallbackStrategy(onStart: c => Equal(0, c.History(instrument, 100).Count))));
+Test("Startup has no future observations", () => Run(new CallbackStrategy(initialize: c => Equal(0, c.History(instrument, 100).Count))));
 Test("Limit gap improvement and limit cost clamp", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 105))), options: new() { SlippageBps = 1000 });
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 105))), options: new() { SlippageBps = 1000 });
     Equal(105m, result.Fills.Single().Price);
-    var improved = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 105)))); Equal(100m, improved.Fills.Single().Price);
+    var improved = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 105)))); Equal(100m, improved.Fills.Single().Price);
 });
 Test("Untouched limits remain pending and cancel at end", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 50))));
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 50))));
     Equal(0, result.Fills.Count); Equal(OrderStatus.Cancelled, result.Orders[^1].Status);
 });
 Test("Internal crossing, residual fills and commission reconcile", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 10)); c.Submit(new("b", instrument, -4)); }, weight: 0.5m), options: new() { CommissionFixed = 6 });
+    var result = Run(new CallbackStrategy(initialize: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 10)); c.Submit(new("b", instrument, -4)); }, weight: 0.5m), options: new() { CommissionFixed = 6 });
     Equal(3, result.Fills.Count); Equal(2, result.Fills.Count(f => f.Internal)); Equal(6m, result.Fills.Sum(f => f.Commission));
     Equal(6m, result.Final.Positions.Sum(p => p.Quantity)); Equal(result.Final.Equity, result.Equity[^1].Substrategies.Values.Sum());
     Equal(1114m, result.Final.Equity);
 });
 Test("Full internal offset has no external rejection or costs", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 2)); c.Submit(new("b", instrument, -2)); }, weight: 0.5m), options: new() { RejectionProbability = 1, CommissionFixed = 50 });
+    var result = Run(new CallbackStrategy(initialize: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 2)); c.Submit(new("b", instrument, -2)); }, weight: 0.5m), options: new() { RejectionProbability = 1, CommissionFixed = 50 });
     Equal(2, result.Fills.Count); True(result.Fills.All(f => f.Internal)); Equal(1000m, result.Final.Equity);
 });
 Test("Residual rejection preserves internal fills", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 3)); c.Submit(new("b", instrument, -2)); }, weight: 0.5m), options: new() { RejectionProbability = 1 });
+    var result = Run(new CallbackStrategy(initialize: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 3)); c.Submit(new("b", instrument, -2)); }, weight: 0.5m), options: new() { RejectionProbability = 1 });
     Equal(2, result.Fills.Count); Equal(0m, result.Final.Positions.Sum(p => p.Quantity)); True(result.Orders.Any(o => o.Status == OrderStatus.Rejected));
 });
 Test("Different limits and TIF never cross", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 1, OrderType.Limit, 101)); c.Submit(new("b", instrument, -1, OrderType.Limit, 99)); }, weight: 0.5m));
+    var result = Run(new CallbackStrategy(initialize: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 1, OrderType.Limit, 101)); c.Submit(new("b", instrument, -1, OrderType.Limit, 99)); }, weight: 0.5m));
     Equal(2, result.Fills.Count); True(result.Fills.All(f => !f.Internal));
 });
 Test("Proportional commission allocation conserves exact totals", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 1)); c.Submit(new("b", instrument, 2)); }, weight: 0.5m), options: new() { CommissionFixed = 1 });
+    var result = Run(new CallbackStrategy(initialize: c => { c.Register("b", 0.5m); c.Submit(new("a", instrument, 1)); c.Submit(new("b", instrument, 2)); }, weight: 0.5m), options: new() { CommissionFixed = 1 });
     Equal(1m, result.Fills.Sum(f => f.Commission)); Equal(1m / 3, result.Fills[0].Commission);
 });
 Test("Initial margin rejects oversized orders", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 101)))); Equal(0, result.Fills.Count); True(result.Orders.Any(o => o.Reason == "Insufficient initial margin"));
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 101)))); Equal(0, result.Fills.Count); True(result.Orders.Any(o => o.Reason == "Insufficient initial margin"));
 });
 Test("Perpetual funding debits longs", () =>
 {
-    var data = Data(100, 100); data.Funding.Add(new(instrument, start.AddHours(1), 0.01m, 100));
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 2))), data); Equal(998m, result.Final.Equity); Equal(-2m, result.Costs.Single(c => c.Kind == "Funding").Amount);
+    var data = Data(100, 100); data.Funding.Add(new(instrument, start.AddDays(1), 0.01m, 100));
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 2))), data); Equal(998m, result.Final.Equity); Equal(-2m, result.Costs.Single(c => c.Kind == "Funding").Amount);
 });
 Test("Maintenance breach liquidates at observed opening gap", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 50))), Data(100, 81, 80));
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 50))), Data(100, 81, 80));
     True(result.Fills.Any(f => f.Liquidation)); Equal(0m, result.Final.Positions.Sum(p => p.Quantity)); Equal(50m, result.Final.Equity);
 });
 Test("Seeded rejection is reproducible with both outcomes", () =>
 {
     // Create a fresh strategy that submits on every bar to compare seeded rejection sequences.
-    CallbackStrategy Strategy() => new(onBar: (c, _) => c.Submit(new("a", instrument, 1)));
+    CallbackStrategy Strategy() => new(onClose: (c, _) => c.Submit(new("a", instrument, 1)));
     var data = Data(Enumerable.Repeat(100m, 100).ToArray()); var options = new SimulationOptions { RejectionProbability = 0.5 };
     var one = Run(Strategy(), data, options); var two = Run(Strategy(), data, options);
     Equal(JsonSerializer.Serialize(one, Json.Options), JsonSerializer.Serialize(two, Json.Options)); True(one.Fills.Count is > 10 and < 90);
@@ -165,14 +165,14 @@ Test("Seeded rejection is reproducible with both outcomes", () =>
 Test("Equivalent backtest and fake live-context decisions", () =>
 {
     // Create the same first-bar decision independently for each execution-mode comparison.
-    CallbackStrategy Strategy() => new(onBar: (c, _) => { if (c.History(instrument, 100).Count == 1) c.Submit(new("a", instrument, 2)); });
+    CallbackStrategy Strategy() => new(onClose: (c, _) => { if (c.History(instrument, 100).Count == 1) c.Submit(new("a", instrument, 2)); });
     var engine = new BacktestEngine(); var backtest = engine.Run(Strategy(), Data(100, 110), Config()); var live = engine.Run(Strategy(), Data(100, 110), Config(), ExecutionMode.Live);
     Equal(JsonSerializer.Serialize(backtest.Orders), JsonSerializer.Serialize(live.Orders));
 });
 Test("External data fetches once per key and returns copies", () =>
 {
     var fetches = 0;
-    var strategy = new CallbackStrategy(onStart: c =>
+    var strategy = new CallbackStrategy(initialize: c =>
     {
         var first = c.ExternalData("key", () => { fetches++; return [1, 2]; });
         first[0] = 9;
@@ -180,15 +180,10 @@ Test("External data fetches once per key and returns copies", () =>
     });
     new BacktestEngine().Run(strategy, Data(100), Config()); Equal(1, fetches);
 });
-Test("Scheduled events are ordered and cannot inspect unfinished bars", () =>
-{
-    var seen = new List<DateTimeOffset>();
-    Run(new CallbackStrategy(onStart: c => c.Schedule(start.AddMinutes(30), "event"), onScheduled: (c, _) => { seen.Add(c.Time); Equal(0, c.History(instrument, 1).Count); }));
-    Equal(start.AddMinutes(30), seen.Single());
-});
+
 Test("Rebalance accounts for outstanding orders", () =>
 {
-    var result = Run(new CallbackStrategy(onBar: (c, _) => { if (c.History(instrument, 100).Count == 1) { var weights = new Dictionary<Instrument, decimal> { [instrument] = 0.5m }; c.Rebalance("a", weights); c.Rebalance("a", weights); } }));
+    var result = Run(new CallbackStrategy(onClose: (c, _) => { if (c.History(instrument, 100).Count == 1) { var weights = new Dictionary<Instrument, decimal> { [instrument] = 0.5m }; c.Rebalance("a", weights); c.Rebalance("a", weights); } }));
     Equal(1, result.Fills.Count); Equal(5m, result.Fills[0].Quantity);
 });
 Test("SMA and EMA warmup and reference values", () => { Equal<decimal?>(null, Indicators.Sma([1, 2], 3)); Equal<decimal?>(3, Indicators.Sma([1, 2, 3, 4], 3)); Equal<decimal?>(3, Indicators.Ema([1, 2, 3, 4], 3)); });
@@ -196,30 +191,30 @@ Test("Data rejects duplicates, malformed bars and gaps", () =>
 {
     var data = Data(100, 110); data.Bars.Add(data.Bars[0]); Throws<InvalidDataException>(() => DatasetValidator.Validate(data));
     data = Data(100); data.Bars[0] = data.Bars[0] with { Low = 200 }; Throws<InvalidDataException>(() => DatasetValidator.Validate(data));
-    data = Data(100, 110, 120); data.Bars.RemoveAt(1); Throws<InvalidDataException>(() => DatasetValidator.RequireCoverage(data, instrument, start, start.AddHours(3)));
+    data = Data(100, 110, 120); data.Bars.RemoveAt(1); Throws<InvalidDataException>(() => DatasetValidator.RequireCoverage(data, instrument, start, start.AddDays(3)));
 });
 Test("GBM is seeded and produces valid positive OHLC", () =>
 {
-    var first = BrownianGenerator.Generate(instrument, BarInterval.Hourly, start, 100, 42); DatasetValidator.Validate(first);
-    Equal(JsonSerializer.Serialize(first), JsonSerializer.Serialize(BrownianGenerator.Generate(instrument, BarInterval.Hourly, start, 100, 42)));
+    var first = BrownianGenerator.Generate(instrument, BarInterval.Daily, start, 100, 42); DatasetValidator.Validate(first);
+    Equal(JsonSerializer.Serialize(first), JsonSerializer.Serialize(BrownianGenerator.Generate(instrument, BarInterval.Daily, start, 100, 42)));
 });
 Test("Cache fetches only missing coverage and reuses valid bars", () =>
 {
     var provider = new FixtureProvider(Data(100, 110, 120)); var cache = new DataCache(Temporary());
-    cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(2)), []).GetAwaiter().GetResult();
-    cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
-    cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
-    Equal(2, provider.Requests.Count); Equal(start.AddHours(2), provider.Requests[1].Start);
+    cache.GetAsync(provider, new(instrument, BarInterval.Daily, start, start.AddDays(2)), []).GetAwaiter().GetResult();
+    cache.GetAsync(provider, new(instrument, BarInterval.Daily, start, start.AddDays(3)), []).GetAwaiter().GetResult();
+    cache.GetAsync(provider, new(instrument, BarInterval.Daily, start, start.AddDays(3)), []).GetAwaiter().GetResult();
+    Equal(2, provider.Requests.Count); Equal(start.AddDays(2), provider.Requests[1].Start);
 });
 Test("Symbol binding resolves legacy venues and case across history orders and positions", () =>
 {
     var alias = instrument with { Venue = "another-source", Symbol = "btc" };
-    var result = Run(new CallbackStrategy(onStart: c =>
+    var result = Run(new CallbackStrategy(initialize: c =>
     {
         Equal(instrument, c.ResolveInstrument("btc"));
         Equal(0, c.History("BTC", 5).Count);
         new InstrumentContext(c, "a", "btc").Buy(1);
-    }, onBar: (c, _) =>
+    }, onClose: (c, _) =>
     {
         Equal(c.History(instrument, 5).Count, c.History(alias, 5).Count);
         if (c.History(alias, 5).Count == 1)
@@ -231,12 +226,12 @@ Test("Symbol binding resolves legacy venues and case across history orders and p
     Equal(2, result.Fills.Count);
     True(result.Fills.All(f => f.Instrument == instrument));
     Equal(0m, result.Final.Positions.Single().Quantity);
-    var direct = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", alias, 1))));
+    var direct = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", alias, 1))));
     Equal(instrument, direct.Fills.Single().Instrument);
 });
 Test("Missing symbols and asset-class mismatches fail before silent warmup", () =>
 {
-    Run(new CallbackStrategy(onStart: c =>
+    Run(new CallbackStrategy(initialize: c =>
     {
         Throws<ArgumentException>(() => new InstrumentContext(c, "a", "MISSING"));
         Throws<ArgumentException>(() => c.History("MISSING", 90));
@@ -254,18 +249,18 @@ Test("Symbol cache reuses source metadata without provider-keyed duplicates", ()
 {
     var directory = Temporary(); var cache = new DataCache(directory);
     var first = new FixtureProvider(Data(100, 110, 120));
-    var request = new DataRequest(instrument, BarInterval.Hourly, start, start.AddHours(2));
+    var request = new DataRequest(instrument, BarInterval.Daily, start, start.AddDays(2));
     cache.GetAsync(first, request, []).GetAwaiter().GetResult();
-    Equal("symbol-BTC-60.json", Path.GetFileName(Directory.GetFiles(directory).Single()));
+    Equal("symbol-BTC-1440.json", Path.GetFileName(Directory.GetFiles(directory).Single()));
     var aliasRequest = request with { Instrument = instrument with { Venue = "elsewhere", Symbol = "btc" } };
     var reused = cache.GetAsync(new NamedFixtureProvider(Data(900, 900), "different-source"), aliasRequest, []).GetAwaiter().GetResult();
     Equal("fixture", reused.Provider); Equal(100m, reused.Bars[0].Close);
     Equal(1, Directory.GetFiles(directory).Length);
     var before = File.ReadAllText(Directory.GetFiles(directory).Single());
     Throws<InvalidDataException>(() => cache.GetAsync(new NamedFixtureProvider(Data(900, 900, 900), "different-source"),
-        aliasRequest with { End = start.AddHours(3) }, []).GetAwaiter().GetResult());
+        aliasRequest with { End = start.AddDays(3) }, []).GetAwaiter().GetResult());
     Equal(before, File.ReadAllText(Directory.GetFiles(directory).Single()));
-    var extended = cache.GetAsync(first, aliasRequest with { End = start.AddHours(3) }, []).GetAwaiter().GetResult();
+    var extended = cache.GetAsync(first, aliasRequest with { End = start.AddDays(3) }, []).GetAwaiter().GetResult();
     Equal(3, extended.Bars.Count); Equal(2, first.Requests.Count);
 });
 Test("Symbol cache rejects multiple files instead of selecting by provider", () =>
@@ -274,7 +269,7 @@ Test("Symbol cache rejects multiple files instead of selecting by provider", () 
     Json.Write(Path.Combine(directory, "one.json"), data);
     Json.Write(Path.Combine(directory, "two.json"), data with { Provider = "other" });
     Throws<InvalidDataException>(() => new DataCache(directory).GetAsync(new FixtureProvider(data),
-        new(instrument, BarInterval.Hourly, start, start.AddHours(1)), []).GetAwaiter().GetResult());
+        new(instrument, BarInterval.Daily, start, start.AddDays(1)), []).GetAwaiter().GetResult());
 });
 Test("Backtest data is assembled read-only from the main historical cache", () =>
 {
@@ -283,12 +278,12 @@ Test("Backtest data is assembled read-only from the main historical cache", () =
     var eth = btc with { Provider = "fixture-b", Bars = btc.Bars.Select(b => b with { Instrument = instrument with { Symbol = "ETH" } }).ToList() };
     Json.Write(Path.Combine(directory, "btc.json"), btc);
     Json.Write(Path.Combine(directory, "eth.json"), eth);
-    Json.Write(Path.Combine(directory, "daily.json"), BrownianGenerator.Generate(instrument, BarInterval.Daily, start, 2, 3));
-    var loaded = DataCache.Load(directory, BarInterval.Hourly, start.AddHours(1), start.AddHours(3));
+    Json.Write(Path.Combine(directory, "daily.json"), BrownianGenerator.Generate(instrument, BarInterval.Daily, start.AddYears(-1), 2, 3));
+    var loaded = DataCache.Load(directory, BarInterval.Daily, start.AddDays(1), start.AddDays(3));
     Equal(4, loaded.Bars.Count); Equal(2, loaded.Bars.Select(b => b.Instrument).Distinct().Count());
-    True(loaded.Bars.All(b => b.OpenTime >= start.AddHours(1) && b.CloseTime <= start.AddHours(3)));
+    True(loaded.Bars.All(b => b.OpenTime >= start.AddDays(1) && b.CloseTime <= start.AddDays(3)));
     Equal(3, Directory.GetFiles(directory).Length);
-    Throws<InvalidDataException>(() => DataCache.Load(directory, BarInterval.Hourly, start.AddYears(10), start.AddYears(11)));
+    Throws<InvalidDataException>(() => DataCache.Load(directory, BarInterval.Daily, start.AddYears(10), start.AddYears(11)));
 });
 Test("Legacy cache data is reused without data revisions", () =>
 {
@@ -298,43 +293,43 @@ Test("Legacy cache data is reused without data revisions", () =>
     node["version"] = "obsolete";
     File.WriteAllText(path, node.ToJsonString());
     var provider = new FixtureProvider(data);
-    new DataCache(directory).GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(2)), []).GetAwaiter().GetResult();
+    new DataCache(directory).GetAsync(provider, new(instrument, BarInterval.Daily, start, start.AddDays(2)), []).GetAwaiter().GetResult();
     Equal(0, provider.Requests.Count); Equal(1, Directory.GetFiles(directory).Length);
     True(!File.ReadAllText(path).Contains("\"version\""));
-    Equal(2, DataCache.Load(directory, BarInterval.Hourly).Bars.Count);
+    Equal(2, DataCache.Load(directory, BarInterval.Daily).Bars.Count);
 });
 Test("Missing history reports feed and dates and preserves cached coverage", () =>
 {
     var directory = Temporary(); var provider = new FixtureProvider(Data(100)); var cache = new DataCache(directory);
-    cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(1)), []).GetAwaiter().GetResult();
+    cache.GetAsync(provider, new(instrument, BarInterval.Daily, start, start.AddDays(1)), []).GetAwaiter().GetResult();
     var path = Directory.GetFiles(directory).Single(); var before = File.ReadAllText(path);
     try
     {
-        cache.GetAsync(provider, new(instrument, BarInterval.Hourly, start, start.AddHours(3)), []).GetAwaiter().GetResult();
+        cache.GetAsync(provider, new(instrument, BarInterval.Daily, start, start.AddDays(3)), []).GetAwaiter().GetResult();
         throw new Exception("Missing history unexpectedly succeeded.");
     }
     catch (InvalidDataException error)
     {
-        True(error.Message.Contains("fixture") && error.Message.Contains("2024-01-01 01:00") && error.Message.Contains("Missing 2"));
+        True(error.Message.Contains("fixture") && error.Message.Contains("2024-01-02 00:00") && error.Message.Contains("Missing 2"));
     }
     Equal(before, File.ReadAllText(path));
 });
 Test("Provider errors do not expose response secrets", () =>
 {
     using var http = new HttpClient(new ResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("SECRET-123") }));
-    try { new HyperliquidProvider(http).FetchAsync(new(instrument, BarInterval.Hourly, start, start.AddHours(1))).GetAwaiter().GetResult(); throw new Exception("Expected HTTP error"); }
+    try { new HyperliquidProvider(http).FetchAsync(new(instrument, BarInterval.Daily, start, start.AddDays(1))).GetAwaiter().GetResult(); throw new Exception("Expected HTTP error"); }
     catch (HttpRequestException e) { True(!e.Message.Contains("SECRET")); }
 });
 Test("Hyperliquid fails on missing candle history", () =>
 {
     using var http = new HttpClient(new ResponseHandler(_ => new(HttpStatusCode.OK) { Content = new StringContent("[]") }));
-    Throws<InvalidDataException>(() => new HyperliquidProvider(http).FetchAsync(new(instrument, BarInterval.Hourly, start, start.AddHours(1))).GetAwaiter().GetResult());
+    Throws<InvalidDataException>(() => new HyperliquidProvider(http).FetchAsync(new(instrument, BarInterval.Daily, start, start.AddDays(1))).GetAwaiter().GetResult());
 });
 Test("Export totals and provenance manifest", () =>
 {
     var directory = Temporary(); var strategy = Path.Combine(directory, "strategy.cs"); var dataPath = Path.Combine(directory, "data.json");
-    File.WriteAllText(strategy, "using Citrus.Trading; public class Example : IStrategy { }"); var data = Data(100, 110); Json.Write(dataPath, data);
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 2))), data);
+    File.WriteAllText(strategy, "using Citrus.Trading; public class Example : Strategy { }"); var data = Data(100, 110); Json.Write(dataPath, data);
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 2))), data);
     var output = Path.Combine(directory, "result"); Reports.Export(output, result, Config(), data, strategy, dataPath, new Dictionary<string, string>());
     using var summary = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "summary.json")));
     Equal(1020m, summary.RootElement.GetProperty("final").GetProperty("equity").GetDecimal());
@@ -345,12 +340,12 @@ Test("Export totals and provenance manifest", () =>
 Test("Repeated exports replace results while retaining unrelated files", () =>
 {
     var directory = Temporary(); var strategy = Path.Combine(directory, "strategy.cs"); var dataPath = Path.Combine(directory, "data.json");
-    File.WriteAllText(strategy, "using Citrus.Trading; public class First : IStrategy { }");
+    File.WriteAllText(strategy, "using Citrus.Trading; public class First : Strategy { }");
     var data = Data(100, 110); Json.Write(dataPath, data);
     var output = Path.Combine(directory, "result");
-    Reports.Export(output, Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument, 2)), data), Config(), data, strategy, dataPath, new Dictionary<string, string>());
+    Reports.Export(output, Run(new CallbackStrategy(initialize: c => c.Buy("a", instrument, 2)), data), Config(), data, strategy, dataPath, new Dictionary<string, string>());
     File.WriteAllText(Path.Combine(output, "notes.txt"), "keep");
-    File.WriteAllText(strategy, "using Citrus.Trading; public class Second : IStrategy { }");
+    File.WriteAllText(strategy, "using Citrus.Trading; public class Second : Strategy { }");
     data = Data(100, 120); Json.Write(dataPath, data);
     var result = Run(new CallbackStrategy(), data);
     Reports.Export(output, result, Config(), data, strategy, dataPath, new Dictionary<string, string>());
@@ -368,12 +363,12 @@ MarketDataset Equities() => new() { Bars = [
     Sessions = [new(DateTimeOffset.Parse("2024-03-08T14:30:00Z"), DateTimeOffset.Parse("2024-03-08T21:00:00Z")), new(DateTimeOffset.Parse("2024-03-11T13:30:00Z"), DateTimeOffset.Parse("2024-03-11T20:00:00Z"))] };
 Test("Equity sessions handle weekend and DST with next-open orders", () =>
 {
-    var data = Equities(); var result = Run(new CallbackStrategy(onBar: (c, _) => { if (c.History(equity, 10).Count == 1) c.Submit(new("a", equity, 1, OrderType.MarketOnOpen)); }), data);
+    var data = Equities(); var result = Run(new CallbackStrategy(onClose: (c, _) => { if (c.History(equity, 10).Count == 1) c.Submit(new("a", equity, 1, OrderType.MarketOnOpen)); }), data);
     Equal(data.Bars[1].OpenTime, result.Fills.Single().Time); Equal(50m, result.Fills.Single().Price);
 });
 Test("MOC cannot fill the close that produced its decision", () =>
 {
-    var data = Equities(); var result = Run(new CallbackStrategy(onBar: (c, _) => { if (c.History(equity, 10).Count == 1) c.Submit(new("a", equity, 1, OrderType.MarketOnClose)); }), data);
+    var data = Equities(); var result = Run(new CallbackStrategy(onClose: (c, _) => { if (c.History(equity, 10).Count == 1) c.Submit(new("a", equity, 1, OrderType.MarketOnClose)); }), data);
     Equal(data.Bars[1].CloseTime, result.Fills.Single().Time);
 });
 Test("Adjusted equity returns preserve quantities and reconcile without cash income", () =>
@@ -381,7 +376,7 @@ Test("Adjusted equity returns preserve quantities and reconcile without cash inc
     var data = Equities();
     data.Bars[0] = data.Bars[0] with { Open = 50, High = 50, Low = 50, Close = 50 };
     data.Bars[1] = data.Bars[1] with { Open = 51, High = 53, Low = 50, Close = 52 };
-    var result = Run(new CallbackStrategy(onStart: c =>
+    var result = Run(new CallbackStrategy(initialize: c =>
     {
         c.Buy("a", equity, 3);
         c.BuyLimit("a", equity, 1, 40);
@@ -392,7 +387,7 @@ Test("Adjusted equity returns preserve quantities and reconcile without cash inc
     Equal(6m, result.Attribution.Sum(a => a.NetPnl));
     Equal(40m, result.Orders.Last(o => o.Request.Type == OrderType.Limit).Request.LimitPrice);
     True(result.Costs.All(c => c.Kind == "Commission"));
-    var shortResult = Run(new CallbackStrategy(onStart: c => c.Sell("a", equity, 3)), data, new() { AnnualBorrowRate = .1m });
+    var shortResult = Run(new CallbackStrategy(initialize: c => c.Sell("a", equity, 3)), data, new() { AnnualBorrowRate = .1m });
     True(shortResult.Costs.Any(c => c.Kind == "Borrow" && c.Amount < 0));
     Equal(-3m, shortResult.Final.Positions.Single().Quantity);
 });
@@ -427,7 +422,7 @@ Test("Adjusted equity cache reuses snapshots and rejects mixed-basis extension",
 });
 Test("Unavailable equity shorts reject", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", equity, -1))), Equities(), new() { ShortsAvailable = false }); Equal(0, result.Fills.Count);
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", equity, -1))), Equities(), new() { ShortsAvailable = false }); Equal(0, result.Fills.Count);
 });
 
 Test("Notification sequence accepts before filling", () =>
@@ -438,7 +433,7 @@ Test("Notification sequence accepts before filling", () =>
 Test("Perpetual day limits expire at UTC midnight", () =>
 {
     var data = Data(Enumerable.Repeat(100m, 26).ToArray());
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 50, TimeInForce.Day))), data);
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 1, OrderType.Limit, 50, TimeInForce.Day))), data);
     Equal(start.AddDays(1), result.Orders.Last().Time); Equal("Day order expired", result.Orders.Last().Reason);
 });
 Test("Session gaps and holidays do not synthesize bars", () =>
@@ -446,9 +441,8 @@ Test("Session gaps and holidays do not synthesize bars", () =>
     var sessions = new[] { new MarketSession(DateTimeOffset.Parse("2024-07-03T13:30:00Z"), DateTimeOffset.Parse("2024-07-03T17:00:00Z")),
         new MarketSession(DateTimeOffset.Parse("2024-07-05T13:30:00Z"), DateTimeOffset.Parse("2024-07-05T20:00:00Z")) };
     Equal(2, DatasetValidator.Expected(equity, BarInterval.Daily, sessions[0].Open, sessions[1].Close, sessions).Count);
-    Equal(11, DatasetValidator.Expected(equity, BarInterval.Hourly, sessions[0].Open, sessions[1].Close, sessions).Count);
 });
-Test("Alpaca pagination aggregates adjusted regular-session minutes", () =>
+Test("Alpaca pagination binds adjusted daily bars to exchange sessions", () =>
 {
     var calls = 0; var data = Equities();
     using var http = new HttpClient(new ResponseHandler(message =>
@@ -456,16 +450,16 @@ Test("Alpaca pagination aggregates adjusted regular-session minutes", () =>
         calls++;
         True(message.Headers.Contains("APCA-API-KEY-ID"));
         var url = message.RequestUri!.ToString();
-        True(url.Contains("adjustment=all"));
+        True(url.Contains("adjustment=all") && url.Contains("timeframe=1Day"));
         True(!url.Contains("corporate-actions"));
         var body =
-            url.Contains("page_token=p2") ? "{\"bars\":{\"ABC\":[{\"t\":\"2024-03-08T14:31:00Z\",\"o\":101,\"h\":103,\"l\":99,\"c\":102,\"v\":20}]},\"next_page_token\":null}" :
-            "{\"bars\":{\"ABC\":[{\"t\":\"2024-03-08T14:30:00Z\",\"o\":100,\"h\":101,\"l\":98,\"c\":101,\"v\":10}]},\"next_page_token\":\"p2\"}";
+            url.Contains("page_token=p2") ? "{\"bars\":{\"ABC\":[{\"t\":\"2024-03-11T04:00:00Z\",\"o\":101,\"h\":103,\"l\":99,\"c\":102,\"v\":20}]},\"next_page_token\":null}" :
+            "{\"bars\":{\"ABC\":[{\"t\":\"2024-03-08T05:00:00Z\",\"o\":100,\"h\":101,\"l\":98,\"c\":101,\"v\":10}]},\"next_page_token\":\"p2\"}";
         return new(HttpStatusCode.OK) { Content = new StringContent(body) };
     }));
-    var result = new AlpacaProvider(http, "key", "secret", data.Sessions).FetchAsync(new(equity, BarInterval.Daily, data.Sessions[0].Open, data.Sessions[0].Close)).GetAwaiter().GetResult();
-    Equal(2, calls); Equal(100m, result.Bars.Single().Open); Equal(102m, result.Bars.Single().Close); Equal(30m, result.Bars.Single().Volume);
-    Equal(103m, result.Bars.Single().High); Equal(98m, result.Bars.Single().Low);
+    var result = new AlpacaProvider(http, "key", "secret", data.Sessions).FetchAsync(new(equity, BarInterval.Daily, data.Sessions[0].Open, data.Sessions[1].Close)).GetAwaiter().GetResult();
+    Equal(2, calls); Equal(2, result.Bars.Count); Equal(100m, result.Bars[0].Open); Equal(102m, result.Bars[1].Close); Equal(30m, result.Bars.Sum(b => b.Volume));
+    Equal(data.Sessions[0].Open, result.Bars[0].OpenTime); Equal(data.Sessions[1].Close, result.Bars[1].CloseTime);
     DatasetValidator.Validate(result);
 });
 Test("Alpaca calendar converts New York DST and early closes", () =>
@@ -482,12 +476,12 @@ Test("Hyperliquid funding pagination advances and preserves rates", () =>
     using var http = new HttpClient(new ResponseHandler(message =>
     {
         calls++; var body = message.Content!.ReadAsStringAsync().GetAwaiter().GetResult(); string response;
-        if (body.Contains("candleSnapshot")) response = JsonSerializer.Serialize(Enumerable.Range(0, 2).Select(i => new { t = start.AddHours(i).ToUnixTimeMilliseconds(), o = "100", h = "105", l = "95", c = "101", v = "10" }));
-        else { fundingCalls++; response = fundingCalls <= 2 ? JsonSerializer.Serialize(new[] { new { time = start.AddHours(fundingCalls).ToUnixTimeMilliseconds(), fundingRate = "0.001" } }) : "[]"; }
+        if (body.Contains("candleSnapshot")) response = JsonSerializer.Serialize(Enumerable.Range(0, 2).Select(i => new { t = start.AddDays(i).ToUnixTimeMilliseconds(), o = "100", h = "105", l = "95", c = "101", v = "10" }));
+        else { fundingCalls++; response = fundingCalls <= 2 ? JsonSerializer.Serialize(Enumerable.Range(1, 24).Select(hour => new { time = start.AddHours((fundingCalls - 1) * 24 + hour).ToUnixTimeMilliseconds(), fundingRate = "0.001" })) : "[]"; }
         return new(HttpStatusCode.OK) { Content = new StringContent(response) };
     }));
-    var data = new HyperliquidProvider(http).FetchAsync(new(instrument, BarInterval.Hourly, start, start.AddHours(2))).GetAwaiter().GetResult();
-    Equal(3, calls); Equal(2, data.Funding.Count); Equal(0.001m, data.Funding[0].Rate); Equal(101m, data.Funding[1].MarkPrice);
+    var data = new HyperliquidProvider(http).FetchAsync(new(instrument, BarInterval.Daily, start, start.AddDays(2))).GetAwaiter().GetResult();
+    Equal(3, calls); Equal(48, data.Funding.Count); Equal(0.001m, data.Funding[0].Rate); Equal(101m, data.Funding[^1].MarkPrice);
 });
 Test("Daily returns include the first trading day's performance", () =>
 {
@@ -497,7 +491,7 @@ Test("Daily returns include the first trading day's performance", () =>
 Test("Risk checks value limit fills against current marks", () =>
 {
     var data = Data(100); data.Bars[0] = data.Bars[0] with { Low = 10, Close = 10 };
-    var result = Run(new CallbackStrategy(onStart: c => c.Submit(new("a", instrument, 20, OrderType.Limit, 100))), data);
+    var result = Run(new CallbackStrategy(initialize: c => c.Submit(new("a", instrument, 20, OrderType.Limit, 100))), data);
     Equal(0, result.Fills.Count); True(result.Orders.Any(o => o.Reason == "Insufficient initial margin"));
 });
 Test("Malformed configuration fields are rejected", () =>
@@ -508,7 +502,7 @@ Test("Malformed configuration fields are rejected", () =>
 });
 Test("Direct buy and sell quantities trade independently of capital weights", () =>
 {
-    var result = Run(new CallbackStrategy(onBar: (c, _) =>
+    var result = Run(new CallbackStrategy(onClose: (c, _) =>
     {
         var count = c.History(instrument, 10).Count;
         if (count == 1) c.Buy("a", instrument, 2.5m);
@@ -519,7 +513,7 @@ Test("Direct buy and sell quantities trade independently of capital weights", ()
 });
 Test("Direct order IDs support cancellation and sells can open shorts", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c =>
+    var result = Run(new CallbackStrategy(initialize: c =>
     {
         var id = c.BuyLimit("a", instrument, 1, 50);
         True(c.Cancel(id));
@@ -529,7 +523,7 @@ Test("Direct order IDs support cancellation and sells can open shorts", () =>
 });
 Test("Direct limit functions preserve sides, prices and day expiry", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c =>
+    var result = Run(new CallbackStrategy(initialize: c =>
     {
         c.BuyLimit("a", instrument, 2, 99);
         c.SellLimit("a", instrument, 1, 104);
@@ -541,7 +535,7 @@ Test("Direct limit functions preserve sides, prices and day expiry", () =>
 });
 Test("Direct orders reject nonpositive quantities and limit prices", () =>
 {
-    Run(new CallbackStrategy(onStart: c =>
+    Run(new CallbackStrategy(initialize: c =>
     {
         Throws<ArgumentOutOfRangeException>(() => c.Buy("a", instrument, 0));
         Throws<ArgumentOutOfRangeException>(() => c.Sell("a", instrument, -1));
@@ -556,7 +550,7 @@ Test("Direct auction functions preserve session timing and quantities", () =>
     foreach (var close in new[] { false, true })
     {
         var data = Equities();
-        var result = Run(new CallbackStrategy(onBar: (c, _) =>
+        var result = Run(new CallbackStrategy(onClose: (c, _) =>
         {
             if (c.History(equity, 2).Count != 1) return;
             if (close) { if (sell) c.SellOnClose("a", equity, 1); else c.BuyOnClose("a", equity, 1); }
@@ -572,7 +566,7 @@ Test("Built-in strategies can call direct order functions", () =>
 });
 if (args.Contains("--benchmark"))
 {
-    foreach (var (interval, count) in new[] { (BarInterval.Daily, 3650), (BarInterval.Hourly, 24 * 365 * 2) })
+    foreach (var (interval, count) in new[] { (BarInterval.Daily, 3650) })
     {
         var bars = Enumerable.Range(0, 100).SelectMany(i => BrownianGenerator.Generate(instrument with { Symbol = $"S{i}" }, interval, start, count, i).Bars).OrderBy(b => b.OpenTime).ToList();
         var data = new MarketDataset { Bars = bars, Interval = interval };
@@ -790,40 +784,19 @@ Test("Payday mid-month data uses full calendar ordinals and does not close at a 
     Equal(full.Sessions[15].Close, result.Fills[2].Time);
     Equal(8m, result.Final.Positions.Single().Quantity);
 });
-Test("Payday hourly input still decides once per session and matches daily input", () =>
-{
-    var strategy = new PaydaySeasonality();
-    var daily = PaydayData();
-    var bars = new List<Bar>();
-    foreach (var session in daily.Sessions)
-        for (var open = session.Open; open < session.Close; open = open.AddHours(1))
-        {
-            var close = open.AddHours(1) < session.Close ? open.AddHours(1) : session.Close;
-            var price = close == session.Close ? 120m : 90m;
-            bars.Add(new(daily.Bars[0].Instrument, open, close, price, price, price, price, 10000,
-                open == session.Open, close == session.Close));
-        }
-    var result = new BacktestEngine().Run(strategy, daily with { Interval = BarInterval.Hourly, Bars = bars }, Config() with { InitialCash = 2000 });
-    Equal(8, result.Fills.Count);
-    Equal(6m, result.Fills[0].Quantity);
-    Equal(120m, result.Fills[0].Price);
-    Equal(daily.Sessions[7].Close, result.Fills[0].Time);
-    Equal(daily.Sessions[6].Close, result.Orders.First().Time);
-    var dailyResult = new BacktestEngine().Run(strategy, PaydayData(120m), Config() with { InitialCash = 2000 });
-    True(result.Fills.SequenceEqual(dailyResult.Fills));
-});
+
 
 Test("Instrument calendar handles offsets, holidays, month boundaries and absent coverage", () =>
 {
     var data = PaydayData();
     InstrumentContext? market = null;
-    Run(new CallbackStrategy(onStart: c =>
+    Run(new CallbackStrategy(initialize: c =>
     {
         market = new(c, "a", data.Bars[0].Instrument);
         True(market.TradingDay() is null);
         True(market.Close is null);
         True(market.BuyNotional(810) is null);
-    }, onBar: (c, bars) =>
+    }, onClose: (c, bars) =>
     {
         var index = data.Sessions.FindIndex(s => s.Close == c.Time);
         var current = market!.TradingDay()!;
@@ -844,11 +817,11 @@ Test("Instrument calendar handles offsets, holidays, month boundaries and absent
         }
         True(market.TradingDay(int.MaxValue) is null);
     }), data);
-    Throws<InvalidOperationException>(() => Run(new CallbackStrategy(onBar: (c, _) => new InstrumentContext(c, "a", instrument).TradingDay())));
+    Run(new CallbackStrategy(onClose: (c, _) => True(new InstrumentContext(c, "a", instrument).TradingDay() is not null)));
 });
 Test("Bound order helpers round lots and preserve direct quantities and limits", () =>
 {
-    var result = Run(new CallbackStrategy(onBar: (c, _) =>
+    var result = Run(new CallbackStrategy(onClose: (c, _) =>
     {
         if (c.History(instrument, 2).Count != 1) return;
         var market = new InstrumentContext(c, "a", instrument);
@@ -868,7 +841,7 @@ Test("Bound order helpers round lots and preserve direct quantities and limits",
 });
 Test("Position intent reverses once and preserves pending exits across opposite-side calls", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => c.Buy("a", instrument, 3), onBar: (c, _) =>
+    var result = Run(new CallbackStrategy(initialize: c => c.Buy("a", instrument, 3), onClose: (c, _) =>
     {
         var market = new InstrumentContext(c, "a", instrument) { EntryNotional = 250 };
         var count = market.History(10).Count;
@@ -895,7 +868,7 @@ Test("Position intent reverses once and preserves pending exits across opposite-
 });
 Test("Entry warmup and notional drift use completed prices and pending lots", () =>
 {
-    Run(new CallbackStrategy(onBar: (c, _) =>
+    Run(new CallbackStrategy(onClose: (c, _) =>
     {
         var market = new InstrumentContext(c, "a", instrument) { EntryNotional = 250, WarmupBars = 2 };
         if (market.History(10).Count == 1)
@@ -924,7 +897,7 @@ Test("Entry warmup and notional drift use completed prices and pending lots", ()
 });
 Test("Rejected entries leave no projected holding or phantom exit", () =>
 {
-    var result = Run(new CallbackStrategy(onBar: (c, _) =>
+    var result = Run(new CallbackStrategy(onClose: (c, _) =>
     {
         var market = new InstrumentContext(c, "a", instrument) { EntryNotional = 250 };
         if (market.History(10).Count == 1) market.EnterLong();
@@ -955,12 +928,12 @@ Test("ExitLong cancels only its account and instrument and repeated calls cannot
     var other = instrument with { Symbol = "ETH" };
     var data = Data(100, 100, 100);
     data = data with { Bars = data.Bars.Concat(data.Bars.Select(b => b with { Instrument = other })).OrderBy(b => b.OpenTime).ToList() };
-    var result = Run(new CallbackStrategy(weight: 0.5m, onStart: c =>
+    var result = Run(new CallbackStrategy(weight: 0.5m, initialize: c =>
     {
         c.Register("b", 0.5m);
         c.Buy("a", instrument, 3);
         c.Buy("b", instrument, 2);
-    }, onBar: (c, _) =>
+    }, onClose: (c, _) =>
     {
         if (c.History(instrument, 2).Count != 1) return;
         c.Buy("a", instrument, 1);
@@ -980,7 +953,7 @@ Test("ExitLong cancels only its account and instrument and repeated calls cannot
 });
 Test("ExitShort covers actual shorts and ExitLong never adds to them", () =>
 {
-    var result = Run(new CallbackStrategy(onStart: c => new InstrumentContext(c, "a", instrument).Sell(2), onBar: (c, _) =>
+    var result = Run(new CallbackStrategy(initialize: c => new InstrumentContext(c, "a", instrument).Sell(2), onClose: (c, _) =>
     {
         if (c.History(instrument, 2).Count != 1) return;
         var market = new InstrumentContext(c, "a", instrument);
@@ -1002,15 +975,13 @@ Console.WriteLine($"{tests.Count - failures}/{tests.Count} tests passed.");
 return failures == 0 ? 0 : 1;
 
 /// <summary>Adapts optional test callbacks to strategy events after registering a default account.</summary>
-sealed class CallbackStrategy(Action<IStrategyContext>? onStart = null, Action<IStrategyContext, IReadOnlyList<Bar>>? onBar = null,
-    Action<IStrategyContext, string>? onScheduled = null, decimal weight = 1) : IStrategy
+sealed class CallbackStrategy(Action<IStrategyContext>? initialize = null, Action<IStrategyContext, IReadOnlyList<Bar>>? onClose = null,
+    decimal weight = 1) : Strategy
 {
     /// <summary>Registers the default account and invokes the optional startup test callback.</summary>
-    public void OnStart(IStrategyContext context) { context.Register("a", weight); onStart?.Invoke(context); }
+    protected override void Initialize() { Context.Register("a", weight); initialize?.Invoke(Context); }
     /// <summary>Forwards completed bars to the optional test callback.</summary>
-    public void OnBar(IStrategyContext context, IReadOnlyList<Bar> bars) => onBar?.Invoke(context, bars);
-    /// <summary>Forwards a named scheduled event to the optional test callback.</summary>
-    public void OnScheduled(IStrategyContext context, string name) => onScheduled?.Invoke(context, name);
+    protected override void OnClose() => onClose?.Invoke(Context, CompletedBars);
 }
 /// <summary>Serves in-memory bars and records requested ranges for cache regression checks.</summary>
 sealed class FixtureProvider(MarketDataset data) : IMarketDataProvider
@@ -1035,13 +1006,14 @@ sealed class ResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> respo
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(respond(request));
 }
 /// <summary>Exercises many substrategies, history lookups, indicators, and initial orders for explicit benchmarks.</summary>
-sealed class BenchmarkStrategy : IStrategy
+sealed class BenchmarkStrategy : Strategy
 {
     /// <summary>Registers twenty equal-capital substrategies for the benchmark workload.</summary>
-    public void OnStart(IStrategyContext c) { for (var i = 0; i < 20; i++) c.Register($"s{i}", 0.05m); }
+    protected override void Initialize() { var c = Context; for (var i = 0; i < 20; i++) c.Register($"s{i}", 0.05m); }
     /// <summary>Computes each substrategy indicator and submits one small order per instrument on its first bar.</summary>
-    public void OnBar(IStrategyContext c, IReadOnlyList<Bar> bars)
+    protected override void OnClose()
     {
+        var c = Context; var bars = CompletedBars;
         for (var i = 0; i < 20; i++) foreach (var bar in bars)
         {
             _ = Indicators.Sma(c.History(bar.Instrument, 20).Select(b => b.Close), 20);
@@ -1050,19 +1022,19 @@ sealed class BenchmarkStrategy : IStrategy
     }
 }
 /// <summary>Records callback ordering for an order submitted during startup.</summary>
-sealed class NotificationStrategy(Instrument instrument) : IStrategy
+sealed class NotificationStrategy(Instrument instrument) : Strategy
 {
     public readonly List<string> Notifications = [];
     /// <summary>Registers an account and submits a one-unit order to exercise notification delivery.</summary>
-    public void OnStart(IStrategyContext c) { c.Register("a", 1); c.Submit(new("a", instrument, 1)); }
+    protected override void Initialize() { var c = Context; c.Register("a", 1); c.Submit(new("a", instrument, 1)); }
     /// <summary>Records the delivered status name so the test can compare callback order.</summary>
-    public void OnOrderUpdate(IStrategyContext c, OrderUpdate update) => Notifications.Add(update.Status.ToString());
+    protected override void OnOrderUpdate(OrderUpdate update) => Notifications.Add(update.Status.ToString());
     /// <summary>Records fill delivery in the same sequence as order status callbacks.</summary>
-    public void OnFill(IStrategyContext c, Fill fill) => Notifications.Add("Fill");
+    protected override void OnFill(Fill fill) => Notifications.Add("Fill");
 }
 
 /// <summary>Exercises the daily API with an early closing-auction entry.</summary>
-internal sealed class AuctionFixture : DailyStrategy
+internal sealed class AuctionFixture : Strategy
 {
     private StrategyAccount account = null!;
     /// <summary>Allocates the test account and binds its traded symbol case-insensitively.</summary>
@@ -1075,7 +1047,7 @@ internal sealed class AuctionFixture : DailyStrategy
 }
 
 /// <summary>Observes monthly session counts through the instrument-independent daily API.</summary>
-internal sealed class MonthlyCalendarFixture : DailyStrategy
+internal sealed class MonthlyCalendarFixture : Strategy
 {
     public List<(DateOnly Date, int Day, int Total)> Before { get; } = [];
     public List<(DateOnly Date, int Day, int Total)> Closes { get; } = [];

@@ -76,8 +76,8 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-DATA-003** Citrus shall cache downloaded historical data and shall not redownload data already present and valid in the cache.
 - **UR-DATA-004** Citrus shall import provider-adjusted equity OHLC prices, including adjusted close, without separate dividend, split, merger, symbol-change, or delisting processing.
 - **UR-DATA-005** Citrus shall provide a geometric or arithmetic Brownian-motion data generator, as selected in the detailed design, for simulated prices.
-- **UR-DATA-006** Citrus shall initially support daily and hourly data intervals.
-- **UR-DATA-007** The market-data architecture shall permit additional data intervals to be added later.
+- **UR-DATA-006** Citrus shall support end-of-day trading only, using one full-session equity bar or one UTC-day perpetual bar. All strategies shall derive from one Strategy base class; non-daily intervals and arbitrary-time strategy scheduling are unsupported.
+- **UR-DATA-007** The market-data pipeline shall reject non-daily intervals and partial-session bars before strategy execution.
 - **UR-DATA-008** Backtests shall assemble a MarketDataset from matching entries in the user-wide historical data cache. Strategies shall select the instruments they trade and may access history and place orders for any instrument in that assembled dataset. Orders for instruments without cached market bars shall fail with a missing-data error.
 - **UR-DATA-009** Data download commands shall cache historical coverage from Alpaca for equities or Hyperliquid for perpetuals for reuse. Unavailable coverage shall fail rather than shorten it silently.
 - **UR-DATA-010** Backtests shall read prepared history from the main cache without provider network access and shall capture the assembled dataset with their results.
@@ -100,7 +100,7 @@ A user deploys the same strategy definition through the command-line interface. 
 
 - **UR-LIVE-001** For equities, Citrus shall support strategy execution a configurable number of minutes before market close.
 - **UR-LIVE-002** Equity market-session timing shall be determined using Alpaca's market clock or calendar service.
-- **UR-LIVE-003** Citrus shall support immediate, externally scheduled execution, including invocation by a cron-compatible scheduler for cryptocurrency rebalancing.
+- **UR-LIVE-003** Future live execution shall use the same EOD decision lifecycle, including external invocation after a daily close.
 
 ### 3.8 Equities trading
 
@@ -130,7 +130,7 @@ A user deploys the same strategy definition through the command-line interface. 
 The following decisions are needed before the requirements can be made fully testable.
 
 1. Define whether strategy scripts are trusted local code and whether they may load arbitrary libraries or access the network and filesystem.
-2. Define the strategy event model, including startup, data arrival, scheduled execution, order updates, fills, shutdown, and recovery after interruption.
+2. Define the strategy event model, including initialization, pre-close auction decisions, completed daily closes, order updates, fills, shutdown, and recovery after interruption.
 3. Define the order-netting rules, including how compatible orders are combined, how opposing orders interact, whether order types and limits may be combined, and how fills and costs are attributed to their originating substrategies.
 4. Define backtest execution assumptions for each order type, including bar timing, fill price, limit-order fills, commissions, liquidity, partial fills, rejected orders, and look-ahead prevention.
 5. Resolved: equity data uses adjusted OHLC prices. Corporate actions are not simulated separately; holdings and order quantities change only through execution.

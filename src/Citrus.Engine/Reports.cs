@@ -24,7 +24,7 @@ public static class Reports
             peak = Math.Max(peak, value.Equity);
             if (peak > 0) drawdown = Math.Max(drawdown, (peak - value.Equity) / peak);
         }
-        // The first observation is the capital baseline, not a daily close; intraday points still affect drawdown.
+        // The first observation is the capital baseline, not a daily close; open, auction and funding valuations still affect drawdown.
         var days = values.Skip(1).GroupBy(v => v.Time.UtcDateTime.Date).Select(g => g.Last().Equity).ToArray();
         var returns = new List<double>();
         var previous = values[0].Equity;
@@ -45,7 +45,7 @@ public static class Reports
 
     /// <summary>Writes JSON/CSV results, replacing matching output files while retaining unrelated files.</summary>
     public static void Export(string directory, BacktestResult result, RunConfiguration configuration, MarketDataset data,
-        string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes, IStrategy? strategy = null)
+        string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes, Strategy? strategy = null)
     {
         Directory.CreateDirectory(directory);
         if (strategy is not null) configuration = StrategyConfiguration.Resolve(strategy, configuration);

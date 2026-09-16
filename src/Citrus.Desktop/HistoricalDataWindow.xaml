@@ -11,7 +11,7 @@
    <Label Grid.Column="2" Content="Alpaca feed"/><ComboBox x:Name="feed" Grid.Column="3" Margin="3" AutomationProperties.Name="Alpaca feed"/>
    <Label Grid.Row="1" Content="Symbol"/><TextBox x:Name="symbol" Grid.Row="1" Grid.Column="1" Margin="3" AutomationProperties.Name="Symbol"/>
    <Label Grid.Row="1" Grid.Column="2" Content="Venue"/><TextBox x:Name="venue" Grid.Row="1" Grid.Column="3" Margin="3" AutomationProperties.Name="Venue"/>
-   <Label Grid.Row="2" Content="Bar interval"/><ComboBox x:Name="interval" Grid.Row="2" Grid.Column="1" Margin="3" AutomationProperties.Name="Bar interval"/>
+   <Label Grid.Row="2" Content="Bar interval"/><TextBlock Grid.Row="2" Grid.Column="1" Margin="3" Text="Daily (EOD)"/>
    <Label Grid.Row="3" Content="Start date (UTC)"/><DatePicker x:Name="start" Grid.Row="3" Grid.Column="1" Margin="3" AutomationProperties.Name="Start date UTC"/>
    <Label Grid.Row="3" Grid.Column="2" Content="End date (exclusive)"/><DatePicker x:Name="end" Grid.Row="3" Grid.Column="3" Margin="3" AutomationProperties.Name="End date UTC exclusive"/>
   </Grid>

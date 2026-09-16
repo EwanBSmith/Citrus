@@ -19,8 +19,6 @@ public sealed class StrategyOptions
     /// <summary>Exclusive UTC end; assign null to use all available ending history.</summary>
     public DateTimeOffset? End { get => Get<DateTimeOffset?>(null); set => Set(value); }
 
-    /// <summary>Bar interval used to load historical data.</summary>
-    public BarInterval Interval { get => Get<BarInterval>(BarInterval.Daily); set => Set(value); }
 
     /// <summary>Starting portfolio cash.</summary>
     public decimal InitialCash { get => Get<decimal>(100_000m); set => Set(value); }

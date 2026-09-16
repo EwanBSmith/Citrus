@@ -5,8 +5,10 @@ using System.IO;
 
 using Citrus.Trading;
 
-/// <summary>Adapts the source portfolio to Citrus closing-auction calendar orders and next-open price signals.</summary>
-public sealed class ZorroPortfolio : DailyStrategy
+/// <summary>
+/// Adapts the source portfolio to Citrus closing-auction calendar orders and next-open price signals.
+/// </summary>
+public sealed class ZorroPortfolio : Strategy
 {
     private StrategyAccount payday = null!, gold = null!, bond = null!, reversion = null!, hedge = null!, basis = null!, risk = null!, oil = null!, pair = null!;
     private (double Date, double Close)[] vix = [], vix3m = [];
@@ -14,11 +16,12 @@ public sealed class ZorroPortfolio : DailyStrategy
     private double? ema, previousRatio, previousEma;
     protected override int WarmupBars => 91;
 
-    /// <summary>Fixes the portfolio's starting cash, daily bars and borrowing model in strategy code.</summary>
+    /// <summary>
+    /// Fixes the portfolio's starting cash, daily bars and borrowing model in strategy code.
+    /// </summary>
     protected override void Configure(StrategyOptions options)
     {
         options.InitialCash = 17_000m;
-        options.Interval = BarInterval.Daily;
         options.AnnualBorrowRate = 0m;
         options.ShortsAvailable = true;
     }
@@ -46,17 +49,17 @@ public sealed class ZorroPortfolio : DailyStrategy
     /// </summary>
     protected override void OnClose()
     {
-        var tdm = TradingDayOfMonth();
-        var tom = TradingDaysInMonth();
         var spot = IndexClose(vix, Time); var term = IndexClose(vix3m, Time);
-        EqBondReversion(tdm, tom, beforeClose: false);
+        EqBondReversion(TradingDayOfMonth(), TradingDaysInMonth(), beforeClose: false);
         VIXHedge();
         VIXBasis(spot, term);
         RiskPremia();
         EqBondPair();
     }
 
-    /// <summary>Trades the monthly equity-versus-bond reversion signal after the completed close.</summary>
+    /// <summary>
+    /// Trades the monthly equity-versus-bond reversion signal after the completed close.
+    /// </summary>
     private void EqBondReversion(int tdm, int tom, bool beforeClose)
     {
         if (beforeClose)
@@ -78,7 +81,9 @@ public sealed class ZorroPortfolio : DailyStrategy
         else if (difference < 0) reversion["SCHB"].EnterLong();
     }
 
-    /// <summary>Maintains the fixed short-volatility and medium-term-volatility hedge notionals.</summary>
+    /// <summary>
+    /// Maintains the fixed short-volatility and medium-term-volatility hedge notionals.
+    /// </summary>
     private void VIXHedge()
     {
         if (!payday["SCHB"].HasHistory(90)) return;
@@ -87,7 +92,9 @@ public sealed class ZorroPortfolio : DailyStrategy
         hedge["VXZ"].TargetNotional(1542.949951171875m, tolerance: .05m);
     }
 
-    /// <summary>Switches the volatility-basis allocation from the completed VIX term-structure signal.</summary>
+    /// <summary>
+    /// Switches the volatility-basis allocation from the completed VIX term-structure signal.
+    /// </summary>
     private void VIXBasis(double spot, double term)
     {
         volatility.Add(spot);
@@ -101,7 +108,9 @@ public sealed class ZorroPortfolio : DailyStrategy
         else { basis["VIXY"].ExitLong(); basis["SVXY"].ExitLong(); }
     }
 
-    /// <summary>Preserves the source's skipped volatility slot and Assets ordering; missing slot is explicitly zero.</summary>
+    /// <summary>
+    /// Preserves the source's skipped volatility slot and Assets ordering; missing slot is explicitly zero.
+    /// </summary>
     private void RiskPremia()
     {
         if (!payday["SCHB"].HasHistory(90)) return;
@@ -123,7 +132,9 @@ public sealed class ZorroPortfolio : DailyStrategy
         for (var i = 0; i < 3; i++) if (weights[i] > 0) risk[symbols[i]].TargetNotional((decimal)(weights[i] * factor) * risk.Allocation, tolerance: .05m);
     }
 
-    /// <summary>Updates and trades the equity-versus-bond midpoint crossover after the completed close.</summary>
+    /// <summary>
+    /// Updates and trades the equity-versus-bond midpoint crossover after the completed close.
+    /// </summary>
     private void EqBondPair()
     {
         var equities = pair["SCHB"].Midpoint; var bonds = pair["TLT"].Midpoint;
@@ -142,7 +153,9 @@ public sealed class ZorroPortfolio : DailyStrategy
         previousRatio = ratios.Count == 0 ? null : ratios[^1]; previousEma = ema;
     }
 
-    /// <summary>Submits calendar-known trades one minute before the auction using only previously completed prices.</summary>
+    /// <summary>
+    /// Submits calendar-known trades one minute before the auction using only previously completed prices.
+    /// </summary>
     protected override void BeforeClose()
     {
         if (!payday["SCHB"].HasHistory(90)) return;
@@ -156,21 +169,27 @@ public sealed class ZorroPortfolio : DailyStrategy
         OilSeason(date);
     }
 
-    /// <summary>Trades the source payday entry and exit dates at the closing auction.</summary>
+    /// <summary>
+    /// Trades the source payday entry and exit dates at the closing auction.
+    /// </summary>
     private void PaydaySeason(int tdm, int tom)
     {
         if (tdm is 8 or 16) payday["SCHB"].EnterLong(OrderType.MarketOnClose);
         if (tdm == 12 || tdm == tom) payday["SCHB"].ExitLong(OrderType.MarketOnClose);
     }
 
-    /// <summary>Holds gold from each Thursday close until the following session close.</summary>
+    /// <summary>
+    /// Holds gold from each Thursday close until the following session close.
+    /// </summary>
     private void GoldSeason(DateOnly date)
     {
         if (date.DayOfWeek == DayOfWeek.Thursday) gold["GLDM"].EnterLong(OrderType.MarketOnClose);
         else gold["GLDM"].ExitLong(OrderType.MarketOnClose);
     }
 
-    /// <summary>Runs the month-end bond long/short sequence at closing auctions.</summary>
+    /// <summary>
+    /// Runs the month-end bond long/short sequence at closing auctions.
+    /// </summary>
     private void BondSeason(int tdm, int tom)
     {
         if (tdm == tom - 7) bond["TLT"].EnterLong(OrderType.MarketOnClose);
@@ -178,7 +197,9 @@ public sealed class ZorroPortfolio : DailyStrategy
         if (tdm == 7) bond["TLT"].ExitShort(OrderType.MarketOnClose);
     }
 
-    /// <summary>Trades the long and short oil holiday windows at closing auctions.</summary>
+    /// <summary>
+    /// Trades the long and short oil holiday windows at closing auctions.
+    /// </summary>
     private void OilSeason(DateOnly date)
     {
         if (Holiday(WeekdayOffset(date, 5))) oil["UGA"].EnterLong(OrderType.MarketOnClose);
@@ -187,19 +208,24 @@ public sealed class ZorroPortfolio : DailyStrategy
         if (Holiday(WeekdayOffset(date, -1))) oil["UGA"].ExitShort(OrderType.MarketOnClose);
     }
 
-    /// <summary>Shifts dates by weekdays, counting holidays as weekdays.</summary>
+    /// <summary>
+    /// Shifts dates by weekdays, counting holidays as weekdays.
+    /// </summary>
     private static DateOnly WeekdayOffset(DateOnly d, int n)
     {
         for (var left = Math.Abs(n); left > 0;) { d = d.AddDays(Math.Sign(n)); if (d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)) left--; }
         return d;
     }
 
-    /// <summary>Ports holidays.c, including its omission of exceptional exchange closures.</summary>
+    /// <summary>
+    /// Ports holidays.c, including its omission of exceptional exchange closures.
+    /// </summary>
     private static bool Holiday(DateOnly d)
     {
         var y = d.Year;
-        // Find an observed fixed holiday and an ordinal Monday without modifying global bar-day counting.
+        // Finds an observed fixed-date holiday without modifying global bar-day counting.
         DateOnly Observed(int m, int day) { var x = new DateOnly(y, m, day); return x.DayOfWeek == DayOfWeek.Saturday ? x.AddDays(-1) : x.DayOfWeek == DayOfWeek.Sunday ? x.AddDays(1) : x; }
+        // Finds the requested ordinal weekday within a month.
         DateOnly Nth(int m, DayOfWeek dow, int n) { var x = new DateOnly(y, m, 1); return x.AddDays(((int)dow - (int)x.DayOfWeek + 7) % 7 + 7 * (n - 1)); }
         var a = y % 19; var b = y / 100; var c = y % 100; var h = (19 * a + b - b / 4 - (b - (b + 8) / 25 + 1) / 3 + 15) % 30;
         var l = (32 + 2 * (b % 4) + 2 * (c / 4) - h - c % 4) % 7; var m = (a + 11 * h + 22 * l) / 451;
@@ -211,14 +237,18 @@ public sealed class ZorroPortfolio : DailyStrategy
             d == Nth(11, DayOfWeek.Thursday, 4) || d == Observed(12, 25);
     }
 
-    /// <summary>Loads source index records from snapshots beside the strategy, retaining their original timestamps.</summary>
+    /// <summary>
+    /// Loads source index records from snapshots beside the strategy, retaining their original timestamps.
+    /// </summary>
     private (double Date, double Close)[] LoadIndex(string symbol)
     {
         var bytes = Context.ExternalData(symbol, () => File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(typeof(ZorroPortfolio).Assembly.Location)!, "Data", symbol + ".t6")));
         return Enumerable.Range(0, bytes.Length / 32).Select(i => (BitConverter.ToDouble(bytes, i * 32), (double)BitConverter.ToSingle(bytes, i * 32 + 20))).OrderBy(r => r.Item1).ToArray();
     }
 
-    /// <summary>Matches cboeClose's sixteen-hour subtraction and last-known-record lookup.</summary>
+    /// <summary>
+    /// Matches cboeClose's sixteen-hour subtraction and last-known-record lookup.
+    /// </summary>
     private static double IndexClose((double Date, double Close)[] rows, DateTimeOffset time)
     {
         var date = time.UtcDateTime.ToOADate() - 16.0 / 24;

@@ -1,15 +1,19 @@
 using Citrus.Trading;
 
 /// <summary>Trades SCHB's payday windows using daily decisions for the next session's closing auction.</summary>
-public sealed class PaydaySeasonality : InstrumentStrategy
+public sealed class PaydaySeasonality : Strategy
 {
     /// <summary>Allocates the strategy account to SCHB; each entry uses a fixed $810 notional.</summary>
-    public PaydaySeasonality() : base(new Instrument("US", AssetClass.Equity, "SCHB"), "PaydaySeason") { }
+    protected override void Initialize()
+    {
+        Context.Register("PaydaySeason", 1m);
+        market = new InstrumentContext(Context, "PaydaySeason", "SCHB");
+    }
+    private InstrumentContext market = null!;
 
     /// <summary>Signals after sessions 7, 11, 15 and the penultimate session to fill on 8, 12, 16 and month end.</summary>
-    protected override void OnBar(InstrumentContext market, Bar bar)
+    protected override void OnClose()
     {
-        if (!bar.SessionClose) return;
         var next = market.TradingDay(1);
         if (next is null) return;
 

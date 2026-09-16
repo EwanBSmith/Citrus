@@ -4,7 +4,7 @@ namespace Citrus.Trading;
 public sealed class InstrumentContext
 {
     private readonly Lazy<TradingCalendar> calendar;
-    /// <summary>Gets the complete underlying API for scheduling, portfolio access, and advanced orders.</summary>
+    /// <summary>Gets the complete underlying API for portfolio access and advanced orders.</summary>
     public IStrategyContext Context { get; }
     /// <summary>Gets the instrument used by this context.</summary>
     public Instrument Instrument { get; }
@@ -87,7 +87,8 @@ public sealed class InstrumentContext
         Substrategy = substrategy;
         Instrument = context.ResolveInstrument(instrument.Symbol);
         if (Instrument.AssetClass != instrument.AssetClass) throw new ArgumentException($"Asset class does not match history for {instrument.Symbol}.");
-        calendar = new Lazy<TradingCalendar>(() => new TradingCalendar(Context.Sessions, exchangeZone));
+        calendar = new Lazy<TradingCalendar>(() => new TradingCalendar(Context.Sessions,
+            exchangeZone ?? (Instrument.AssetClass == AssetClass.LinearPerpetual ? TimeZoneInfo.Utc : null)));
     }
 
     /// <summary>Binds a symbol directly; venue and asset-class metadata come from the historical dataset.</summary>

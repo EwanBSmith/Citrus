@@ -17,7 +17,7 @@ public sealed class BacktestEngine
 {
     private const int MaximumSubstrategies = 100;
     /// <summary>Validates inputs and runs a trusted strategy to completion; mode only labels the strategy context.</summary>
-    public BacktestResult Run(IStrategy strategy, MarketDataset data, RunConfiguration configuration,
+    public BacktestResult Run(Strategy strategy, MarketDataset data, RunConfiguration configuration,
         ExecutionMode mode = ExecutionMode.Backtest)
     {
         configuration = StrategyConfiguration.Resolve(strategy, configuration);
@@ -28,12 +28,16 @@ public sealed class BacktestEngine
         var available = data.Bars.Select(b => b.Instrument).ToHashSet();
         var ledger = new Ledger(configuration.InitialCash);
         var book = new OrderBook(ledger, configuration.Simulation, configuration.Seed);
-        var context = new Context(ledger, book, mode, available, data.Sessions);
+        var sessions = Sessions(data);
+        var context = new Context(ledger, book, mode, available, sessions);
         var opens = data.Bars.GroupBy(b => b.OpenTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var closes = data.Bars.GroupBy(b => b.CloseTime).ToDictionary(g => g.Key, g => g.OrderBy(b => b.Instrument.Key, StringComparer.Ordinal).ToArray());
         var funding = data.Funding.GroupBy(f => f.Time).ToDictionary(g => g.Key, g => g.OrderBy(f => f.Instrument.Key, StringComparer.Ordinal).ToArray());
         var first = opens.Keys.Min(); var last = closes.Keys.Max();
         var times = new SortedSet<DateTimeOffset>(opens.Keys.Concat(closes.Keys).Concat(funding.Keys).Where(t => t >= first && t <= last));
+        var sessionCloses = sessions.Select(s => s.Close).Where(t => t > first && t <= last).ToHashSet();
+        var auctions = sessions.Select(s => s.Close.AddMinutes(-1)).Where(t => t >= first && t <= last).ToHashSet();
+        times.UnionWith(sessionCloses); times.UnionWith(auctions);
         context.Time = first.AddTicks(-1);
         var points = new List<EquityPoint>();
         var notificationIndex = 0;
@@ -46,13 +50,13 @@ public sealed class BacktestEngine
             {
                 if (++delivered > 100_000) throw new InvalidOperationException("Order callback notification limit exceeded.");
                 var notification = book.Notifications[notificationIndex++];
-                if (notification.IsFill) strategy.OnFill(context, book.Fills[notification.Index]);
-                else strategy.OnOrderUpdate(context, book.Updates[notification.Index]);
+                if (notification.IsFill) strategy.NotifyFill(book.Fills[notification.Index]);
+                else strategy.NotifyOrder(book.Updates[notification.Index]);
             }
         }
         // Append portfolio and substrategy valuations at the current event time.
         void Snapshot() { var p = ledger.Snapshot(context.Time); points.Add(new(p.Time, p.Cash, p.Equity, p.GrossExposure, ledger.AttributedEquity())); }
-        strategy.OnStart(context);
+        strategy.Start(context);
         context.Started = true;
         Dispatch(); Snapshot();
         var previous = first;
@@ -60,7 +64,6 @@ public sealed class BacktestEngine
         {
             while (times.Count > 0)
             {
-                foreach (var scheduled in context.Scheduled.Keys.Where(t => t <= last)) times.Add(scheduled);
                 var time = times.Min; times.Remove(time); context.Time = time;
                 ledger.ChargeBorrow(time, time - previous, configuration.Simulation.AnnualBorrowRate); previous = time;
                 // Settle closing bars before funding and callbacks; same-time opens run only after decisions.
@@ -76,9 +79,9 @@ public sealed class BacktestEngine
                 {
                     // Publish history only once the entire closing batch has completed execution and accounting.
                     foreach (var bar in closing) context.Add(bar);
-                    strategy.OnBar(context, closing);
                 }
-                if (context.Scheduled.Remove(time, out var names)) foreach (var name in names) strategy.OnScheduled(context, name);
+                if (sessionCloses.Contains(time)) strategy.Close(closing ?? []);
+                if (auctions.Contains(time)) strategy.PrepareClose();
                 Dispatch();
                 if (opens.TryGetValue(time, out var opening))
                 {
@@ -95,10 +98,25 @@ public sealed class BacktestEngine
         {
             context.Stopping = true;
             foreach (var order in book.Pending.ToArray()) book.Cancel(order.Id, context.Time, "End of run");
-            Dispatch(); strategy.OnStop(context);
+            Dispatch(); strategy.Stop();
         }
         ledger.Reconcile(context.Time);
         return new(book.Updates, book.Fills, ledger.Movements, points, ledger.Snapshot(context.Time), ledger.Attribution());
+    }
+
+    /// <summary>Uses the exchange calendar or creates complete UTC calendar months for a daily perpetual market.</summary>
+    private static IReadOnlyList<MarketSession> Sessions(MarketDataset data)
+    {
+        if (data.Bars.Select(b => b.Instrument.AssetClass).Distinct().Count() != 1)
+            throw new InvalidDataException("An EOD strategy requires one market calendar; run equities and perpetuals separately.");
+        if (data.Bars[0].Instrument.AssetClass == AssetClass.Equity) return data.Sessions;
+        var first = data.Bars.Min(b => b.OpenTime);
+        var last = data.Bars.Max(b => b.OpenTime);
+        var start = new DateTimeOffset(first.Year, first.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var end = new DateTimeOffset(last.Year, last.Month, 1, 0, 0, 0, TimeSpan.Zero).AddMonths(1);
+        var sessions = new List<MarketSession>();
+        for (var day = start; day < end; day = day.AddDays(1)) sessions.Add(new(day, day.AddDays(1)));
+        return sessions;
     }
 
     /// <summary>Implements strategy operations against the ledger and order book while retaining completed history.</summary>
@@ -106,7 +124,6 @@ public sealed class BacktestEngine
     {
         private readonly Dictionary<Instrument, List<Bar>> history = [];
         private readonly Dictionary<string, Instrument> symbols = available.ToDictionary(i => i.Symbol, StringComparer.OrdinalIgnoreCase);
-        public readonly SortedDictionary<DateTimeOffset, List<string>> Scheduled = [];
         private readonly Dictionary<string, byte[]> externalData = [];
         public bool Started;
         public bool Stopping;
@@ -176,13 +193,6 @@ public sealed class BacktestEngine
                 var delta = desired - ledger.Quantity(substrategy, instrument) - pending;
                 if (Math.Abs(delta) > 0.00000001m) Submit(new(substrategy, instrument, delta));
             }
-        }
-        /// <summary>Queues a named callback at a strictly future UTC time, preserving insertion order for equal times.</summary>
-        public void Schedule(DateTimeOffset time, string name)
-        {
-            if (time.Offset != TimeSpan.Zero || time <= Time || string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Scheduled events require a future UTC time and name.");
-            if (!Scheduled.TryGetValue(time, out var names)) Scheduled.Add(time, names = []);
-            names.Add(name);
         }
         /// <summary>Fetches bytes once per key during a run and returns a defensive copy.</summary>
         public byte[] ExternalData(string key, Func<byte[]> fetch)

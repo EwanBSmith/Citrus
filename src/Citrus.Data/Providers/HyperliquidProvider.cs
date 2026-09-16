@@ -12,17 +12,17 @@ public sealed class HyperliquidProvider(HttpClient client) : IMarketDataProvider
     /// <summary>Posts a JSON info request using shared retry handling; the caller owns the returned document.</summary>
     private Task<JsonDocument> Post(object payload, CancellationToken token) => ProviderHttp.SendAsync(client,
         () => new(HttpMethod.Post, "https://api.hyperliquid.xyz/info") { Content = JsonContent.Create(payload) }, token);
-    /// <summary>Fetches supported hourly or daily history and normalizes provider records for the requested asset class.</summary>
+    /// <summary>Fetches daily history and normalizes provider records for the requested asset class.</summary>
     public async Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default)
     {
         if (request.Instrument.AssetClass != AssetClass.LinearPerpetual) throw new ArgumentException("Hyperliquid adapter requires linear perpetuals.");
-        if (request.Interval != BarInterval.Daily && request.Interval != BarInterval.Hourly) throw new ArgumentException("Provider supports 1h and 1d.");
+        if (request.Interval != BarInterval.Daily) throw new ArgumentException("Only daily bars are supported.");
         using var candles = await Post(new { type = "candleSnapshot", req = new { coin = request.Instrument.Symbol, interval = request.Interval.Name,
             startTime = request.Start.ToUnixTimeMilliseconds(), endTime = request.End.ToUnixTimeMilliseconds() - 1 } }, cancellationToken);
         var bars = candles.RootElement.EnumerateArray().Select(c =>
         {
             var open = DateTimeOffset.FromUnixTimeMilliseconds(c.GetProperty("t").GetInt64());
-            return new Bar(request.Instrument, open, open.AddMinutes(request.Interval.Minutes), ProviderHttp.Number(c, "o"),
+            return new Bar(request.Instrument, open, open.AddDays(1), ProviderHttp.Number(c, "o"),
                 ProviderHttp.Number(c, "h"), ProviderHttp.Number(c, "l"), ProviderHttp.Number(c, "c"), ProviderHttp.Number(c, "v"));
         }).Where(b => b.OpenTime >= request.Start && b.CloseTime <= request.End).OrderBy(b => b.OpenTime).ToList();
         var data = new MarketDataset { Provider = Name, Interval = request.Interval, Bars = bars };

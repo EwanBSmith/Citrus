@@ -49,23 +49,22 @@ Default requires the portfolio ETF history in the configured cache. Demo require
 
 ### Settings in strategy code
 
-Declare authoritative run settings in `Configure`. For `DailyStrategy` and `InstrumentStrategy`, override the protected method; direct `IStrategy` implementations use `public void Configure(StrategyOptions options)`.
+Declare authoritative run settings by overriding the protected `Configure` method on `Strategy`. Citrus supports end-of-day trading only.
 
 ```csharp
 protected override void Configure(StrategyOptions options)
 {
     options.InitialCash = 17_000m;
-    options.Interval = BarInterval.Daily;
     options.AnnualBorrowRate = 0m;
     options.ShortsAvailable = true;
 }
 ```
 
-Only explicitly assigned properties override JSON and GUI settings. Assigning zero, false, or null is explicit too: for example, `options.Start = null` requires all available starting history even if JSON specifies a start date. Unassigned settings remain configurable per backtest. The available declarations cover start/end dates, interval, capital, rejection seed, risk-free rate, commissions, spread, slippage, rejection probability, borrowing, short availability, and equity/perpetual margins. Strategy-specific thresholds and allocations remain ordinary C# fields.
+Only explicitly assigned properties override JSON and GUI settings. Assigning zero, false, or null is explicit too: for example, `options.Start = null` requires all available starting history even if JSON specifies a start date. Unassigned settings remain configurable per backtest. The available declarations cover start/end dates, capital, rejection seed, risk-free rate, commissions, spread, slippage, rejection probability, borrowing, short availability, and equity/perpetual margins. Strategy-specific thresholds and allocations remain ordinary C# fields.
 
-The GUI reads built-in declarations when opening a configuration, displays effective values, and disables the fields controlled by C#. Rebuild and restart after source changes, then use **Validate** to refresh; **Run** always reloads the declarations. Strategy selection loads the matching declarations. Configuration occurs before cache selection, account creation, or `OnStart`/`Initialize`. Keep `Configure` deterministic and independent of market/context state. Declarations are frozen once per loaded strategy instance.
+The GUI reads built-in declarations when opening a configuration, displays effective values, and disables the fields controlled by C#. Rebuild and restart after source changes, then use **Validate** to refresh; **Run** always reloads the declarations. Strategy selection loads the matching declarations. Configuration occurs before cache selection, account creation, or `Initialize`. Keep `Configure` deterministic and independent of market/context state. Declarations are frozen once per loaded strategy instance.
 
-CLI runs, GUI runs, and direct engine calls apply the same precedence rules. Reports record the effective configuration and declared options. Paths, strategy selection, output locations, historical-cache locations and credentials remain outside strategy options. ZorroPortfolio defines its $17,000 capital, daily interval, zero borrowing and short availability in C#; its dates remain per-backtest settings.
+CLI runs, GUI runs, and direct engine calls apply the same precedence rules. Reports record the effective configuration and declared options. Paths, strategy selection, output locations, historical-cache locations and credentials remain outside strategy options. ZorroPortfolio defines its $17,000 capital, zero borrowing and short availability in C#; its dates remain per-backtest settings.
 
 A standalone JSON configuration selects a built-in strategy by its full type name:
 
@@ -77,7 +76,7 @@ A standalone JSON configuration selects a built-in strategy by its full type nam
 }
 ```
 
-Output paths are relative to the configuration file, regardless of the directory name. There is no special strategy-folder layout. Each strategy must be a public, concrete IStrategy with a public parameterless constructor in Citrus.Strategies. Use the CLI strategies command to list available names. Add dependencies and required content to Citrus.Strategies at build time. Loose source files, external projects, DLL selection, and strategy/reference/solution path settings are no longer supported; old JSON fields are rejected. Move strategy code into Citrus.Strategies and replace those fields with strategyType.
+Output paths are relative to the configuration file, regardless of the directory name. There is no special strategy-folder layout. Each strategy must be a public, concrete Strategy with a public parameterless constructor in Citrus.Strategies. Use the CLI strategies command to list available names. Add dependencies and required content to Citrus.Strategies at build time. Loose source files, external projects, DLL selection, and strategy/reference/solution path settings are no longer supported; old JSON fields are rejected. Move strategy code into Citrus.Strategies and replace those fields with strategyType.
 
 Results contain the effective configuration in `run.json`, the selected market data in `historical-data.json`, and build/input hashes in `manifest.json` as an audit record. Backtests always read from the configured historical cache. Repeatability requires unchanged strategy code, data, engine/runtime, external inputs and deterministic strategy behavior.
 
@@ -85,7 +84,7 @@ To edit the interface visually, open `src/Citrus.Desktop/MainWindow.xaml` in Vis
 
 ## Global settings
 
-Open **Data → Historical data** to download Alpaca equities or Hyperliquid perpetual history at hourly or daily intervals. Choose a symbol, venue, and UTC date range; the end date is exclusive. Alpaca uses Global settings credentials and the selected IEX/SIP feed. Downloads fetch missing history through the existing validated cache and can be cancelled.
+Open **Data → Historical data** to download Alpaca equities or Hyperliquid perpetual history as daily bars. Choose a symbol, venue, and UTC date range; the end date is exclusive. Alpaca uses Global settings credentials and the selected IEX/SIP feed. Downloads fetch missing history through the existing validated cache and can be cancelled.
 
 The default library is `%LOCALAPPDATA%\Citrus\HistoricalData`. Set the main cache in **Global settings**; the `CITRUS_HISTORICAL_DATA` environment variable overrides it for automation. **Refresh** lists each JSON dataset's instruments, coverage bounds, bar count, size and structural validation status. Bounds do not guarantee gap-free coverage. Select a dataset to inspect its provider notes, export a normalized copy, or delete it after confirmation. Do not run another cache writer against the same folder while downloading.
 
@@ -119,13 +118,13 @@ The Demo backtest runs `Citrus.Strategies.DemoHold` against seeded synthetic BTC
 
 ## Concise strategy API
 
-For daily equity portfolios, derive from `DailyStrategy`. Create accounts in `Initialize`, and write rules in `OnClose` or `BeforeClose`. Each strategy runs against a single market. The dataset supplies that market's session calendar, which drives callbacks independently of any instrument. The base class handles symbol binding, session scheduling and callback dispatch. For example:
+For all strategies, derive from `Strategy`. Create accounts in `Initialize`, and write rules in `OnClose` or `BeforeClose`. Each strategy runs against a single market. The dataset supplies that market's session calendar, which drives callbacks independently of any instrument. The base class handles symbol binding, session scheduling and callback dispatch. For example:
 
 ```csharp
 using System;
 using Citrus.Trading;
 
-public sealed class ThursdayGold : DailyStrategy
+public sealed class ThursdayGold : Strategy
 {
     private StrategyAccount gold = null!;
 
@@ -150,9 +149,9 @@ Override `WarmupBars` to delay entry and nonzero notional-target helpers until t
 Daily strategies can call `TradingDayOfMonth()` for the current session's one-based ordinal and `TradingDaysInMonth()` for its month's session count. These use actual market sessions, excluding exchange holidays, and do not depend on an instrument's bars. `TradingDay(offset)` provides the session date, ordinal and month-end flag. Supply complete calendar months even when the backtest covers only part of a month. Dates default to New York; override `ExchangeTimeZone` for another market. Counts require an opened session; before the first calendar session, `TradingDay()` returns null and the count functions throw.
 
 The public `TradingCalendar` provides the same functions for any supplied time and exchange zone. `InstrumentContext.TradingDay()` delegates to this shared calendar. ZorroPortfolio uses these market-session counts instead of its former weekday approximation, so entries around exchange holidays can change.
-`OnClose` runs once at each market session close within the run, after all bars closing at that time are available in history; market orders fill at a subsequent open. `BeforeClose` runs one minute before each supplied session close, including early closes, and can submit an explicit `MarketOnClose` order (day-only by default). Neither hook can see an unfinished bar. `Time` and `Date` are UTC. `DailyStrategy` requires daily equity session bars; for other intervals or instruments use the APIs below. Optional protected `OnFill`, `OnOrderUpdate`, `OnScheduled` and `OnStop` hooks retain notifications and access to `Context`. Reset strategy-owned state in `Initialize` because a strategy instance can be reused.
+`OnClose` runs once at each market session close within the run, after all bars closing at that time are available in history; market orders fill at a subsequent open. `BeforeClose` runs one minute before each supplied session close, including early closes, and can submit an explicit `MarketOnClose` order (day-only by default). Neither hook can see an unfinished bar. `Time` and `Date` are UTC. Equities require full-session bars and an explicit exchange calendar. Perpetuals use complete midnight-to-midnight UTC bars and a generated UTC calendar. Run the two market types separately. Optional protected `OnFill`, `OnOrderUpdate` and `OnStop` hooks retain notifications and access to `Context`. Reset strategy-owned state in `Initialize` because a strategy instance can be reused.
 
-Derive from `InstrumentStrategy` for one account/instrument. Its constructor registers capital and the host forwards only that instrument's bars to `OnBar(InstrumentContext market, Bar bar)`. For other multi-instrument workflows, use `IStrategy` and construct an `InstrumentContext` for each registered account/instrument during startup.
+Use `Account` for portfolio sleeves, or construct an `InstrumentContext` from `Context` after registering an account in `Initialize`. Both single-instrument and multi-instrument strategies derive from `Strategy`.
 
 ```csharp
 var next = market.TradingDay(1);
@@ -164,29 +163,30 @@ if (next?.DayOfMonth is 8 or 16)
 
 `Buy(quantity)` and `Sell(quantity)` remain direct additional-unit orders. Both accept execution type, time-in-force, and an optional limit price. `BuyNotional` and `SellNotional` size additional orders from completed prices; `LotsForNotional` exposes the calculation and accepts a lot size (default one, or e.g. `0.001m` for fractional units). Missing history or an unaffordable lot produces no notional order. `Quantity` reads actual holdings and `Close` reads the latest completed price.
 
-`ExitLong` and `ExitShort` target flat only when the projected holding is on the requested side. They replace matching pending intent with a delta from actual holdings, while preserving an existing exit or opposite-side intent. Repeated or opposite-side exit calls cannot cancel an already pending close. `TargetQuantity(0)` unconditionally targets flat. `CancelOrders` is also available explicitly. Orders use the existing execution, margin, costs, rejection, and attribution rules. For scheduling, portfolio access, or advanced orders, use `market.Context`; the original `IStrategy` API remains available.
+`ExitLong` and `ExitShort` target flat only when the projected holding is on the requested side. They replace matching pending intent with a delta from actual holdings, while preserving an existing exit or opposite-side intent. Repeated or opposite-side exit calls cannot cancel an already pending close. `TargetQuantity(0)` unconditionally targets flat. `CancelOrders` is also available explicitly. Orders use the existing execution, margin, costs, rejection, and attribution rules. For portfolio access or advanced orders, use `market.Context`.
 
 ## Market datasets
 
-Backtests read the user-wide main historical cache, never a dataset path in the run JSON. `interval` is required by the model (daily by default); optional `start` and exclusive `end` fields select a slice. Identical overlapping bars are deduplicated; conflicting bars fail validation. Citrus combines matching cached files, validates interior coverage, and writes the exact assembled input to `historical-data.json` in the result directory before execution. Invalid cache files fail visibly. No provider requests occur during a backtest. Old dataset files with a `version` property remain readable; new files omit it. Remove obsolete `dataVersion` fields from run configurations and `request.version` from download configurations.
+Backtests read the user-wide main historical cache, never a dataset path in the run JSON. `interval` is retained as daily-only file metadata; optional `start` and exclusive `end` fields select a slice. Identical overlapping bars are deduplicated; conflicting bars fail validation. Citrus combines matching cached files, validates interior coverage, and writes the exact assembled input to `historical-data.json` in the result directory before execution. Invalid cache files fail visibly. No provider requests occur during a backtest. Old dataset files with a `version` property remain readable; new files omit it. Remove obsolete `dataVersion` fields from run configurations and `request.version` from download configurations.
 
 Prepare the main cache with **Data → Historical data**, or place normalized outputs from `data generate`, `data download`, or `data import` in the directory selected by Global settings. Strategies can observe and trade any instrument in the assembled cache slice, using exact, case-sensitive identities. Orders for instruments without cached bars fail with a missing-data error.
 
 ## Strategies
 
-Add public, concrete `IStrategy` classes with public parameterless constructors to `Citrus.Strategies`. Declare dependencies in that project and rebuild Citrus. Select each strategy by its full type name in the run configuration.
+Add public, concrete `Strategy` classes with public parameterless constructors to `Citrus.Strategies`. Declare dependencies in that project and rebuild Citrus. Select each strategy by its full type name in the run configuration.
 
 ```csharp
 using System.Collections.Generic;
 using Citrus.Trading;
 
-public sealed class BuyAndHold : IStrategy
+public sealed class BuyAndHold : Strategy
 {
-    public void OnStart(IStrategyContext c) => c.Register("hold", 1m);
-    public void OnBar(IStrategyContext c, IReadOnlyList<Bar> bars)
+    protected override void Initialize() => Context.Register("hold", 1m);
+    protected override void OnClose()
     {
-        if (c.History(bars[0].Instrument, 2).Count == 1)
-            c.Buy("hold", bars[0].Instrument, 10);
+        foreach (var bar in CompletedBars)
+            if (Context.History(bar.Instrument, 2).Count == 1)
+                Context.Buy("hold", bar.Instrument, 10);
     }
 }
 ```
@@ -209,7 +209,7 @@ These calls illustrate alternatives, not a sequence to submit together. All buy/
 
 Register substrategies during startup with positive capital weights summing to at most one; remaining cash stays unallocated. These weights allocate starting capital, not order sizes. A fixed limit of 100 substrategies is enforced in code and cannot be configured. When percentage targeting is useful, `Rebalance` remains available: its dictionary describes the complete target portfolio for that substrategy, and omitted holdings target zero. Targets use its current equity and completed prices, account for pending quantities, and submit market orders. Batch all desired symbols into one dictionary for a multi-symbol rebalance.
 
-Callbacks run sequentially. `History` exposes completed bars only and returns copies. `OnScheduled`, `OnOrderUpdate`, `OnFill`, and `OnStop` are optional. Schedules require future UTC times within the run to execute. Orders may be cancelled by ID. SMA and EMA return `null` until their warmup period is available. `Mode` exposes backtest/live context through the same contract; this release does not connect to a live trading venue.
+Callbacks run sequentially. `History` exposes completed bars only and returns copies. `BeforeClose`, `OnClose`, `OnOrderUpdate`, `OnFill`, and `OnStop` are optional. Strategy decisions use the daily close hooks; arbitrary-time scheduling is not supported. Orders may be cancelled by ID. SMA and EMA return `null` until their warmup period is available. `Mode` exposes backtest/live context through the same contract; this release does not connect to a live trading venue.
 
 Strategies run as **trusted local code**, with normal process permissions, libraries, network access, and filesystem access. They are not sandboxed. Use `ExternalData(key, fetch)` to fetch arbitrary binary API responses once per key during a run. Other I/O, wall-clock reads, and script-owned random sources cannot be monitored or guaranteed reproducible by this engine.
 
@@ -225,9 +225,9 @@ dotnet run --project src/Citrus.Cli -c Release --no-build --no-restore -- data i
 
 Configure Alpaca credentials through **Settings → Global settings**, or set `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the environment. Keep credentials out of run and download JSON files; the private per-user global file is the only configuration intended to store them. Hyperliquid public historical data requires no key. Download commands are opt-in network operations; the normal tests do not invoke them. Use a date range within available completed history.
 
-Alpaca supplies exchange calendar sessions, adjusted minute bars (`adjustment=all`) aggregated into regular-session hourly/daily bars. Hourly buckets start at the session open, with a shorter final bucket where necessary. Missing no-trade minutes are not synthesized, but every expected hourly/daily bucket must contain data. IEX is the default feed; configure `feed` for your account's entitlement. Some instruments have entire sessions without IEX bars. These gaps fail coverage validation and the error lists the missing dates; an entitled SIP feed or imported history may supply the missing coverage. The calendar includes holidays, daylight-saving changes, and early closes. User-imported equity datasets must provide explicit UTC sessions and correct opening/closing flags.
+Alpaca supplies exchange calendar sessions and adjusted daily bars (`timeframe=1Day`, `adjustment=all`). Provider dates are mapped to the matching exchange session, including daylight-saving changes and early closes. IEX is the default feed; configure `feed` for your account entitlement. Missing daily bars fail coverage validation with the missing dates. Imported equity bars must span complete sessions with both boundary flags set. Provider daily OHLC/volume replaces the previous minute aggregation and can differ from older cached snapshots; existing snapshots are not rewritten. See [Alpaca bar aggregation rules](https://docs.alpaca.markets/us/docs/market-data-faq).
 
-Hyperliquid downloads hourly/daily candles and paginated funding rates. Its API supplies only the latest 5,000 candles; missing history fails with a coverage error. Import older data and merge datasets instead of silently shortening the requested period. Its funding history does not include historical mark prices: the adapter uses the latest completed candle close, or the first open at dataset start. This approximation is recorded in dataset notes and the manifest; import funding events with explicit historical marks for exact funding notionals.
+Hyperliquid downloads daily candles and paginated funding rates. Its API supplies only the latest 5,000 candles; missing history fails with a coverage error. Import older data and merge datasets instead of silently shortening the requested period. Its funding history does not include historical mark prices: the adapter uses the latest completed candle close, or the first open at dataset start. This approximation is recorded in dataset notes and the manifest; import funding events with explicit historical marks for exact funding notionals.
 
 The JSON dataset format is defined by `MarketDataset` in `Citrus.Data`. It contains `provider`, `interval`, `bars`, `sessions`, `funding`, and `notes`. Generated files are complete examples. Supplement files may contain only events and an empty bar array; import validates the combined dataset. Duplicate bars/events fail. Equity imports must supply consistently adjusted OHLC prices, including an adjusted close; raw prices are unsupported. Corporate-action fields are rejected. Existing raw equity history must be replaced with adjusted prices.
 
@@ -263,6 +263,8 @@ Run benchmarks explicitly:
 dotnet run --project tests/Citrus.Tests -c Release --no-build --no-restore -- --benchmark
 ```
 
-The benchmark uses 100 symbols, 20 substrategies, SMA calculations, and 2,000 initial orders. It measures engine execution, excluding data generation. Initial Windows/.NET 10 measurements: 365,000 daily bars in 15.978 seconds (205 MiB process peak), and 1,752,000 hourly bars in 70.822 seconds (764 MiB process peak). Memory is the process high-water mark, including dataset generation; these are observations, not hardware-independent limits.
+The benchmark uses 100 symbols, 20 substrategies, SMA calculations, and 2,000 initial orders. It measures engine execution, excluding data generation. Run it locally for current timing and process peak-memory measurements.
 
 GitHub Actions is configured to build, run offline tests, and generate data, validate and execute the Demo backtest on Windows, macOS, and Linux. Local verification on this workspace is Windows only; the CI matrix must run on your remote repository to verify the other hosts.
+
+Only daily interval metadata ("name": "1d", "minutes": 1440) is accepted in existing JSON files. Other intervals fail validation rather than being resampled. Strategy code no longer declares an interval, and the desktop has no interval selector.

@@ -4,7 +4,7 @@ using Citrus.Trading;
 
 namespace Citrus.Data;
 
-/// <summary>Aggregates adjusted equity minute bars within explicit sessions.</summary>
+/// <summary>Downloads adjusted daily equity bars and binds them to explicit exchange sessions.</summary>
 public sealed class AlpacaProvider(HttpClient client, string keyId, string secret, IReadOnlyList<MarketSession> sessions, string feed = "iex") : IMarketDataProvider
 {
     /// <summary>Gets the provider identity used for provenance and cache partitioning.</summary>
@@ -16,18 +16,20 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
         message.Headers.Add("APCA-API-KEY-ID", keyId); message.Headers.Add("APCA-API-SECRET-KEY", secret);
         return message;
     }, token);
-    /// <summary>Fetches supported hourly or daily history and normalizes provider records for the requested asset class.</summary>
+    /// <summary>Fetches daily history and normalizes provider records for the requested asset class.</summary>
     public async Task<MarketDataset> FetchAsync(DataRequest request, CancellationToken cancellationToken = default)
     {
         if (request.Instrument.AssetClass != AssetClass.Equity) throw new ArgumentException("Alpaca adapter requires equities.");
-        if (request.Interval != BarInterval.Daily && request.Interval != BarInterval.Hourly) throw new ArgumentException("Provider supports 1h and 1d.");
-        // Minute bars are aggregated from the regular session open, avoiding extended-hours contamination and hour alignment ambiguity.
+        if (request.Interval != BarInterval.Daily) throw new ArgumentException("Only daily bars are supported.");
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+        // Daily records are timestamped at midnight in New York, before the exchange opens.
+        var from = TimeZoneInfo.ConvertTimeToUtc(TimeZoneInfo.ConvertTime(request.Start, zone).Date, zone);
         var rows = new List<(DateTimeOffset Time, decimal Open, decimal High, decimal Low, decimal Close, decimal Volume)>();
         string? page = null;
         var tokens = new HashSet<string>();
         do
         {
-            var url = $"https://data.alpaca.markets/v2/stocks/bars?symbols={Uri.EscapeDataString(request.Instrument.Symbol)}&timeframe=1Min&adjustment=all&feed={Uri.EscapeDataString(feed)}&start={Uri.EscapeDataString(request.Start.ToString("O"))}&end={Uri.EscapeDataString(request.End.ToString("O"))}&limit=10000";
+            var url = $"https://data.alpaca.markets/v2/stocks/bars?symbols={Uri.EscapeDataString(request.Instrument.Symbol)}&timeframe=1Day&adjustment=all&feed={Uri.EscapeDataString(feed)}&start={Uri.EscapeDataString(from.ToString("O"))}&end={Uri.EscapeDataString(request.End.ToString("O"))}&limit=10000";
             if (page is not null) url += "&page_token=" + Uri.EscapeDataString(page);
             using var document = await Get(url, cancellationToken);
             if (document.RootElement.GetProperty("bars").TryGetProperty(request.Instrument.Symbol, out var values))
@@ -40,13 +42,15 @@ public sealed class AlpacaProvider(HttpClient client, string keyId, string secre
         var bars = new List<Bar>();
         foreach (var (open, close) in DatasetValidator.Expected(request.Instrument, request.Interval, request.Start, request.End, sessions))
         {
-            var slice = rows.Where(r => r.Time >= open && r.Time < close).OrderBy(r => r.Time).ToArray();
-            if (slice.Length == 0) continue;
-            bars.Add(new(request.Instrument, open, close, slice[0].Open, slice.Max(r => r.High), slice.Min(r => r.Low), slice[^1].Close,
-                slice.Sum(r => r.Volume), sessions.Any(s => s.Open == open), sessions.Any(s => s.Close == close)));
+            var date = TimeZoneInfo.ConvertTime(open, zone).Date;
+            var day = rows.Where(r => TimeZoneInfo.ConvertTime(r.Time, zone).Date == date).ToArray();
+            if (day.Length == 0) continue;
+            if (day.Length != 1) throw new InvalidDataException("Expected one provider bar per exchange date.");
+            var row = day[0];
+            bars.Add(new(request.Instrument, open, close, row.Open, row.High, row.Low, row.Close, row.Volume, true, true));
         }
         return new() { Provider = Name, Interval = request.Interval, Bars = bars, Sessions = sessions.ToList(),
-            Notes = ["Regular-session aggregation of adjusted minute bars (adjustment=all); missing trade minutes are not synthesized. Returns include provider price adjustments, with no separate corporate-action accounting."] };
+            Notes = ["Provider daily bars (adjustment=all) mapped to exchange sessions. Returns include provider price adjustments, with no separate corporate-action accounting."] };
     }
     /// <summary>Fetches exchange sessions and converts New York local boundaries to UTC with daylight-saving rules.</summary>
     public static async Task<List<MarketSession>> CalendarAsync(HttpClient client, string keyId, string secret, DateOnly start, DateOnly end, CancellationToken token = default)

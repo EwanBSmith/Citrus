@@ -27,7 +27,6 @@ public partial class ConfigurationEditor : UserControl
             ["Output"] = Output,
             ["Start"] = Start,
             ["End"] = End,
-            ["Interval"] = Interval,
             ["InitialCash"] = InitialCash,
             ["Seed"] = Seed,
             ["RiskFreeRate"] = RiskFreeRate,
@@ -43,7 +42,6 @@ public partial class ConfigurationEditor : UserControl
             ["Simulation.PerpetualInitialMargin"] = PerpetualInitialMargin,
             ["Simulation.PerpetualMaintenanceMargin"] = PerpetualMaintenanceMargin,
         };
-        Interval.ItemsSource = new[] { BarInterval.Hourly, BarInterval.Daily };
         LoadConfiguration(new());
     }
 
@@ -84,11 +82,6 @@ public partial class ConfigurationEditor : UserControl
                 switch (input)
                 {
                     case CheckBox check: check.IsChecked = (bool)value!; break;
-                    case ComboBox combo:
-                        combo.ItemsSource = value is BarInterval interval && interval != BarInterval.Hourly && interval != BarInterval.Daily
-                            ? new[] { BarInterval.Hourly, BarInterval.Daily, interval } : new[] { BarInterval.Hourly, BarInterval.Daily };
-                        combo.SelectedItem = value;
-                        break;
                     case TextBox text:
                         text.Text = value switch
                         {

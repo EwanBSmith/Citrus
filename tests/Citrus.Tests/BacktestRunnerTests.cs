@@ -62,15 +62,15 @@ internal static class BacktestRunnerTests
         var root = Path.Combine(Path.GetTempPath(), "citrus-runner-" + Guid.NewGuid().ToString("N"));
         var cache = Path.Combine(root, "cache");
         Directory.CreateDirectory(cache);
-        var start = DateTimeOffset.Parse("2024-01-01T14:30:00Z");
+        var start = DateTimeOffset.Parse("2024-01-01T00:00:00Z");
         var instrument = new Instrument("fixture", assetClass, "BTC");
         var equity = assetClass == AssetClass.Equity;
         var sessions = equity ? Enumerable.Range(0, 4).Select(i => new MarketSession(start.AddDays(i), start.AddDays(i).AddHours(6.5))).ToList() : [];
         var data = new MarketDataset
         {
-            Interval = equity ? BarInterval.Daily : BarInterval.Hourly, Sessions = sessions,
+            Interval = BarInterval.Daily, Sessions = sessions,
             Bars = Enumerable.Range(0, 4).Select(i => new Bar(instrument,
-                equity ? sessions[i].Open : start.AddHours(i), equity ? sessions[i].Close : start.AddHours(i + 1),
+                equity ? sessions[i].Open : start.AddDays(i), equity ? sessions[i].Close : start.AddDays(i + 1),
                 100 + i * 10, 106 + i * 10, 95 + i * 10, 105 + i * 10, 1000, equity, equity)).ToList()
         };
         Json.Write(Path.Combine(cache, "fixture.json"), data);

@@ -8,7 +8,7 @@ using System.Globalization;
 using Citrus.Trading;
 
 /// <summary>Combines ten calendar, reversion, volatility, and risk-premia sleeves from the supplied source.</summary>
-public sealed class SeasonalityRiskPremia : IStrategy
+public sealed class SeasonalityRiskPremia : Strategy
 {
     private const decimal PaydayAllocation = 810m;
     private const decimal TreasuryAllocation = 2608m;
@@ -54,8 +54,9 @@ public sealed class SeasonalityRiskPremia : IStrategy
     }
 
     /// <summary>Creates ten independently attributed accounts using fixed source dollar allocations.</summary>
-    public void OnStart(IStrategyContext context)
+    protected override void Initialize()
     {
+        var context = Context;
         payday = new Sleeve(context, "PaydaySeason", PaydayAllocation, "SCHB");
         treasury = new Sleeve(context, "BondSeason", TreasuryAllocation, "TLT");
         reversion = new Sleeve(context, "EqBondReversion", EquityBondReversionAllocation, "SCHB", "TLT");
@@ -77,8 +78,10 @@ public sealed class SeasonalityRiskPremia : IStrategy
     }
 
     /// <summary>Evaluates all sleeves once after each completed daily exchange session.</summary>
-    public void OnBar(IStrategyContext context, IReadOnlyList<Bar> bars)
+    protected override void OnClose()
     {
+        var context = Context;
+        var bars = CompletedBars;
         if (!bars.Any(bar => bar.Instrument == Schb && bar.SessionClose) || lastDecision == context.Time) return;
         if (bars.Any(bar => bar.SessionClose && !bar.SessionOpen))
             throw new InvalidOperationException("This combined strategy requires daily bars.");
