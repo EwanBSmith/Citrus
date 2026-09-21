@@ -62,9 +62,9 @@ public sealed class BacktestEngine
         var previous = first;
         try
         {
-            while (times.Count > 0)
+            foreach (var time in times)
             {
-                var time = times.Min; times.Remove(time); context.Time = time;
+                context.Time = time;
                 ledger.ChargeBorrow(time, time - previous, configuration.Simulation.AnnualBorrowRate); previous = time;
                 // Settle closing bars before funding and callbacks; same-time opens run only after decisions.
                 if (closes.TryGetValue(time, out var closing))

@@ -38,9 +38,9 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         Closed += (_, _) => { chart.Dispose(); ClearTables(); };
         if (!DesktopSmokeTest.IsRunning)
-            Loaded += async (_, _) =>
+            Loaded += (_, _) =>
             {
-                await RefreshStrategiesAsync();
+                RefreshStrategies();
                 if (initialPath is not null) Guard(() => LoadConfiguration(initialPath));
             };
     }
@@ -72,7 +72,7 @@ public partial class MainWindow : Window
         switch (e.Parameter as string)
         {
             case "Open": Open(); break;
-            case "RefreshStrategies": _ = RefreshStrategiesAsync(); break;
+            case "RefreshStrategies": RefreshStrategies(); break;
             case "IDE": OpenDevelopmentEnvironment(); break;
             case "Example": CreateExample(); break;
             case "Save": SaveAll(); break;
@@ -159,13 +159,13 @@ public partial class MainWindow : Window
     {
         tabs.SelectedIndex = 0;
         strategies.Focus();
-        if (strategies.Items.Count == 0) _ = RefreshStrategiesAsync();
+        if (strategies.Items.Count == 0) RefreshStrategies();
     }
 
     /// <summary>Lists the runnable strategy classes included in this Citrus build.</summary>
-    internal Task RefreshStrategiesAsync()
+    internal void RefreshStrategies()
     {
-        if (busy) return Task.CompletedTask;
+        if (busy) return;
         try
         {
             SetBusy(true, "Loading Citrus.Strategies...");
@@ -188,7 +188,6 @@ public partial class MainWindow : Window
             ShowError(exception);
         }
         finally { SetBusy(false); }
-        return Task.CompletedTask;
     }
 
     /// <summary>Opens saved settings for the selected type, preserving edits if selection is cancelled.</summary>

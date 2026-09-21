@@ -43,8 +43,8 @@ public static class Reports
         return new(values[0].Equity > 0 ? values[^1].Equity / values[0].Equity - 1 : null, drawdown, sharpe, returns.Count);
     }
 
-    /// <summary>Writes JSON/CSV results, replacing matching output files while retaining unrelated files.</summary>
-    public static void Export(string directory, BacktestResult result, RunConfiguration configuration, MarketDataset data,
+    /// <summary>Writes JSON/CSV results, replacing matching output files while retaining unrelated files, and returns portfolio performance.</summary>
+    public static Performance Export(string directory, BacktestResult result, RunConfiguration configuration, MarketDataset data,
         string strategyPath, string dataPath, IReadOnlyDictionary<string, string> dependencyHashes, Strategy? strategy = null)
     {
         Directory.CreateDirectory(directory);
@@ -106,6 +106,7 @@ public static class Reports
             reproducibility = "Repeatability requires unchanged inputs, engine/runtime, and a deterministic trusted strategy. External I/O and script-owned randomness are untracked.",
             data.Provider, data.Notes
         });
+        return summary.portfolio;
     }
     /// <summary>Writes a UTF-8 CSV with quoted headers and values, invariant numbers, and round-trip timestamps.</summary>
     private static void Csv(string path, string[] headers, IEnumerable<object?[]> rows)

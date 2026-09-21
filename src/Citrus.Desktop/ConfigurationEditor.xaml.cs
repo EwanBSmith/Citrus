@@ -85,7 +85,6 @@ public partial class ConfigurationEditor : UserControl
                     case TextBox text:
                         text.Text = value switch
                         {
-                            string[] paths => string.Join(Environment.NewLine, paths),
                             DateTimeOffset date => date.ToString("O", CultureInfo.InvariantCulture),
                             IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
                             _ => value?.ToString() ?? ""
@@ -121,8 +120,6 @@ public partial class ConfigurationEditor : UserControl
                 value = inputs[key] switch
                 {
                     CheckBox check => check.IsChecked == true,
-                    ComboBox combo => combo.SelectedItem,
-
                     TextBox text => ParseField(text.Text, property.PropertyType),
                     _ => throw new InvalidOperationException("Unsupported setting: " + key)
                 };

@@ -90,13 +90,15 @@ internal static class DesktopSmokeTest
             BacktestRunner.Run(path, config, exampleLibrary);
             if (before != File.ReadAllText(equityPath) || !File.Exists(Path.Combine(first.Output, "retain.txt")))
                 throw new InvalidOperationException("Repeated run or output preservation failed.");
-            ExpectFailure(() => BacktestWorkspace.Parse("{\"unknownSetting\":1}"));
+            var invalidConfiguration = Path.Combine(directory, "invalid-run.json");
+            File.WriteAllText(invalidConfiguration, "{\"unknownSetting\":1}");
+            ExpectFailure(() => RunConfiguration.Read(invalidConfiguration));
             ExpectFailure(() => BacktestRunner.Run(path, config, Path.Combine(directory, "missing-cache")));
             ExpectFailure(() => BacktestRunner.Run(path, config with { Start = DateTimeOffset.Parse("2025-01-02T00:00:00Z"), End = DateTimeOffset.Parse("2025-01-01T00:00:00Z") }, library));
 
             var window = new MainWindow(null, exampleLibrary);
             ShowHidden(window); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            await window.RefreshStrategiesAsync();
+            window.RefreshStrategies();
             Require(window.strategies.Items.Contains("Citrus.Strategies.DemoHold")
                 && window.strategies.Items.Contains("ZorroPortfolio"), "The main strategy catalog did not discover both strategies.");
             window.strategies.SelectedItem = "ZorroPortfolio";

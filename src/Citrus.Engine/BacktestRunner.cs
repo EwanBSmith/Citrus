@@ -1,7 +1,4 @@
 using Citrus.Data;
-using Citrus.Trading;
-using System.Text.Json;
-using System.Security.Cryptography;
 
 namespace Citrus.Engine;
 
@@ -28,9 +25,7 @@ public static class BacktestRunner
         var dataPath = Path.Combine(output, "historical-data.json");
         Json.Write(dataPath, data);
         var result = new BacktestEngine().Run(strategy, data, effective);
-        Reports.Export(output, result, effective, data, strategy.GetType().Assembly.Location, dataPath, BuiltInStrategies.ComponentHashes(), strategy);
-        var performance = Reports.Metrics(result.Equity.Select(point => (point.Time, point.Equity)), effective.RiskFreeRate,
-            data.Bars.Any(bar => bar.Instrument.AssetClass == AssetClass.LinearPerpetual) ? 365 : 252);
+        var performance = Reports.Export(output, result, effective, data, strategy.GetType().Assembly.Location, dataPath, BuiltInStrategies.ComponentHashes(), strategy);
         return new CompletedBacktest(result, performance, output);
     }
 }

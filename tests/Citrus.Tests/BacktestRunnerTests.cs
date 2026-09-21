@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+using System.Text.Json;
 using Citrus.Data;
 using Citrus.Engine;
 using Citrus.Trading;
@@ -20,6 +20,8 @@ internal static class BacktestRunnerTests
                 Require(captured.Bars.SequenceEqual(fixture.Data.Bars.Skip(1).Take(2)) && captured.Sessions.SequenceEqual(fixture.Data.Sessions), "Data selection lost boundaries or calendar coverage.");
                 using var summary = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(completed.Output, "summary.json")));
                 Require(summary.RootElement.GetProperty("annualizationDays").GetInt32() == (assetClass == AssetClass.Equity ? 252 : 365), "Incorrect annualization.");
+                Require(completed.Performance == summary.RootElement.GetProperty("portfolio").Deserialize<Performance>(Json.Options),
+                    "Returned performance differs from the exported portfolio metrics.");
                 var supplied = RunConfiguration.Read(fixture.Path) with { Output = "Edited", Seed = 99, RiskFreeRate = .03m };
                 var notified = 0;
                 var edited = BacktestRunner.Run(fixture.Path, supplied, fixture.Cache, (effective, _) =>
