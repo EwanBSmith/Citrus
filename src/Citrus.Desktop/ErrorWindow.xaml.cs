@@ -3,10 +3,10 @@ namespace Citrus.Desktop;
 /// <summary>Displays a concise error and copyable, redacted technical details.</summary>
 public partial class ErrorWindow : Window
 {
-    /// <summary>Constructs the error layout with designer-safe placeholder content.</summary>
+    /// <summary>Initializes designer-safe error controls.</summary>
     public ErrorWindow() => InitializeComponent();
 
-    /// <summary>Populates the view with actionable failure details.</summary>
+    /// <summary>Shows redacted failure details and a recovery hint.</summary>
     internal void SetError(string operation, Exception error)
     {
         Title = operation;
@@ -21,13 +21,13 @@ public partial class ErrorWindow : Window
         details.Text = ErrorDialog.Redact(operation + Environment.NewLine + error);
     }
 
-    /// <summary>Copies the displayed redacted error text to the clipboard.</summary>
+    /// <summary>Copies the redacted details.</summary>
     private void CopyClicked(object sender, RoutedEventArgs e)
     {
         try { Clipboard.SetText(details.Text); }
         catch (System.Runtime.InteropServices.ExternalException) { summary.Text = "The clipboard is busy. Select and copy the details below."; }
     }
 
-    /// <summary>Closes the error dialog without changing workspace state.</summary>
+    /// <summary>Closes the dialog.</summary>
     private void CloseClicked(object sender, RoutedEventArgs e) => Close();
 }

@@ -3,7 +3,7 @@ namespace Citrus.Trading;
 /// <summary>Provides daily portfolio hooks using completed bars and ordinary pre-close auction submissions.</summary>
 public abstract class Strategy
 {
-    /// <summary>Forwards the configuration phase before the trading context exists.</summary>
+    /// <summary>Invokes Configure before the trading context exists.</summary>
     internal void ConfigureRun(StrategyOptions options) => Configure(options);
     /// <summary>Declares authoritative settings before historical data or accounts are created.</summary>
     protected virtual void Configure(StrategyOptions options) { }
@@ -66,11 +66,11 @@ public abstract class Strategy
 
     /// <summary>Invokes the pre-close auction decision using previously completed history.</summary>
     internal void PrepareClose() => BeforeClose();
-    /// <summary>Forwards order notifications after the engine updates order state.</summary>
+    /// <summary>Notifies the strategy after order state updates.</summary>
     internal void NotifyOrder(OrderUpdate update) => OnOrderUpdate(update);
-    /// <summary>Forwards fills after they are applied to the portfolio.</summary>
+    /// <summary>Notifies the strategy after portfolio fills.</summary>
     internal void NotifyFill(Fill fill) => OnFill(fill);
-    /// <summary>Forwards shutdown after outstanding orders have been cancelled.</summary>
+    /// <summary>Invokes OnStop after pending orders are cancelled.</summary>
     internal void Stop() => OnStop();
 
     /// <summary>Creates accounts and resets strategy-owned indicators at the beginning of every run.</summary>

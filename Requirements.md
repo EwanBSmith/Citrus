@@ -125,28 +125,30 @@ A user deploys the same strategy definition through the command-line interface. 
 - **UR-TEST-001** Citrus shall include automated unit tests for deterministic calculation and execution components.
 - **UR-TEST-002** Automated tests shall validate equivalent strategy decisions across backtest and live execution contexts where the same inputs and execution assumptions apply.
 
-## 4 Clarifications Required
+## 4 Decisions and open questions
 
-The following decisions are needed before the requirements can be made fully testable.
+The current backtesting decisions are documented here:
 
-1. Define whether strategy scripts are trusted local code and whether they may load arbitrary libraries or access the network and filesystem.
-2. Define the strategy event model, including initialization, pre-close auction decisions, completed daily closes, order updates, fills, shutdown, and recovery after interruption.
-3. Define the order-netting rules, including how compatible orders are combined, how opposing orders interact, whether order types and limits may be combined, and how fills and costs are attributed to their originating substrategies.
-4. Define backtest execution assumptions for each order type, including bar timing, fill price, limit-order fills, commissions, liquidity, partial fills, rejected orders, and look-ahead prevention.
-5. Resolved: equity data uses adjusted OHLC prices. Corporate actions are not simulated separately; holdings and order quantities change only through execution.
-6. Define the portfolio accounting model for cash, buying power, margin, leverage, borrow availability and fees, funding payments, and cryptocurrency perpetual liquidation.
-7. Define the optimisation objective, parameter types and ranges, constraints, search methods, parallelism, and the exact walk-forward train and test procedure.
-8. Define live-trading reliability requirements, including persistent state, idempotent order submission, reconciliation with the broker, restart behaviour, stale-data detection, retries, logging, alerts, and emergency shutdown.
-9. Define supported .NET and operating-system versions and whether the GUI must be native or may use a cross-platform web or desktop framework.
-10. Define secrets management and the security boundary for broker credentials and third-party API keys.
-11. Define the required reports and metrics, including trades, orders, equity curve, drawdown, returns, risk measures, and attribution by substrategy and symbol.
-12. Define reproducibility requirements, including captured market-data snapshots, configuration capture, random seeds, engine version, and exportable run manifests.
-13. Define measurable performance targets for backtest speed, supported history length, symbol count, strategy count, optimisation scale, and live execution latency.
+- Strategy trust and external access: [strategy API](README.md#direct-orders-and-portfolio-access).
+- Daily callbacks and session calendars: [strategy lifecycle](README.md#accounts-and-daily-callbacks). Fill timing, limits, liquidity assumptions, and cancellation: [event timing](docs/simulation.md#event-timing).
+- Order compatibility, crossing, commission allocation, and rejection: [netting and costs](docs/simulation.md#netting-and-costs).
+- Cash, margin, borrow, funding, and liquidation: [portfolio accounting](docs/simulation.md#portfolio-accounting).
+- Equity price adjustments and corporate-action limits: [adjusted equity prices](docs/simulation.md#adjusted-equity-prices).
+- Runtime and desktop platform: [build instructions](README.md#build-and-verify) and [Windows desktop](README.md#windows-desktop-workbench).
+- Credential storage and overrides: [global settings](README.md#global-settings).
+- Reports, captured inputs, and reproducibility: [results](README.md#results).
+- Implemented requirements and verification limits: [traceability](docs/requirements-traceability.md).
 
-## 5 Terminology to Standardise
+Open decisions for later work:
 
-- Choose one term for the composable unit currently called both an **algo** and a **substrategy**.
-- Distinguish a **strategy definition** from a configured **strategy instance** and a running **strategy process**.
-- Define whether **symbol** identifies only an instrument or an instrument plus venue and asset class.
-- Define the exact compatibility and attribution rules used when **netting** individual substrategy orders.
-- Define whether **instant running** means immediate one-shot execution, a continuously running service, or both.
+1. Optimisation objectives, parameter ranges, constraints, search methods, parallelism, and walk-forward procedures.
+2. Live deployment and recovery: one-shot versus continuous execution, persistent state, idempotency, broker reconciliation, restarts, stale data, retries, alerts, emergency shutdown, and production credential protection.
+3. Measurable performance and capacity targets: history length, symbol and strategy counts, optimisation scale, and live latency.
+4. Minimum supported OS versions for the cross-platform engine and CLI; the Windows desktop baseline is documented above.
+
+## 5 Terminology
+
+- **Strategy:** a built-in C# class whose instance runs a configured backtest.
+- **Substrategy:** a named account within a strategy, with allocated capital and separately attributed positions.
+- **Symbol:** the case-insensitive historical lookup name within an interval. Venue, provider, and asset class remain metadata; conflicting instrument definitions fail.
+- **Netting:** compatible substrategy orders cross internally; residual exposure is routed externally. See [netting rules](docs/simulation.md#netting-and-costs).

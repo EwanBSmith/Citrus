@@ -27,9 +27,9 @@ public sealed class Ledger(decimal initialCash)
         accounts.Add(name, new Account(startingCash * weight));
         unallocated -= startingCash * weight;
     }
-    /// <summary>Returns whether a substrategy account has been registered.</summary>
+    /// <summary>Checks whether the account is registered.</summary>
     public bool Contains(string name) => accounts.ContainsKey(name);
-    /// <summary>Gets the number of registered substrategy accounts.</summary>
+    /// <summary>Gets the registered account count.</summary>
     public int Count => accounts.Count;
     /// <summary>Sets the price used for subsequent valuation and margin calculations.</summary>
     public void Mark(Instrument instrument, decimal price) => marks[instrument] = price;
